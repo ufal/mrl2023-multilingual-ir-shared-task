@@ -159,6 +159,7 @@ rule project_from_eng:
             open(input.target_text).read().splitlines(),
             language=NLLB_CODES[wildcards.lang],
             model="ychenNLP/nllb-200-3.3B-easyproject",
+            batch_size=16,
             max_span_len=5)
 
         with open(output[0], "w") as f:

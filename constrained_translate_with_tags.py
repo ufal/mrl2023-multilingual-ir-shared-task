@@ -108,6 +108,7 @@ def project_markup(
         tgt_file: List[str],
         language: str,
         model: str = "ychenNLP/nllb-200-3.3B-easyproject",
+        batch_size: int = 32,
         max_span_len: int = 4,):
     """Project entity markup from target language to source language."""
 
@@ -140,17 +141,21 @@ def project_markup(
             logging.info("Source sentence: %s", src_sent)
 
             scores = []
-            tokenized = tokenizer(
-                [src_sent] * len(markup_sentences), text_target=markup_sentences,
-                return_tensors="pt").to(device)
-            logits = model(**tokenized).logits
-            bsz, seq_len, vocab_size = logits.shape
-            # By definitions, all target sequences are the same length, so we
-            # do not need to mask.
-            loss_per_token = xent(
-                logits.view(-1, vocab_size),
-                tokenized["labels"].view(-1)).view(bsz, seq_len)
-            scores = loss_per_token.sum(dim=1).cpu().numpy()
+            # Process in batches to avoid OOM.
+            for i in range(0, len(markup_sentences), batch_size):
+                mt_tgt = markup_sentences[i:i + batch_size]
+                tokenized = tokenizer(
+                    [src_sent] * len(mt_tgt), text_target=mt_tgt,
+                    return_tensors="pt").to(device)
+
+                logits = model(**tokenized).logits
+                bsz, seq_len, vocab_size = logits.shape
+                # By definitions, all target sequences are the same length, so we
+                # do not need to mask.
+                loss_per_token = xent(
+                    logits.view(-1, vocab_size),
+                    tokenized["labels"].view(-1)).view(bsz, seq_len)
+                scores.extend(loss_per_token.sum(dim=1).cpu().numpy().tolist())
 
             _, (best_start, best_end) = min(zip(scores, markup_positions))
             projected_entities.append((ent_type, best_start, best_end))
