@@ -24,7 +24,7 @@ TAG_LIST = [
     "O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC", "B-DATE",
     "I-DATE"]
 
-SPACY_TYPES = ["PERSON", "ORG", "LOC", "DATE", "GPE"]
+SPACY_TYPES = ["PERSON", "ORG", "LOC", "DATE", "GPE", "TIME"]
 
 
 rule all:
@@ -129,6 +129,8 @@ rule ner_with_spacy:
                         ent_type = "PER"
                     elif ent_type == "GPE":
                         ent_type = "LOC"
+                    elif ent_type == "TIME":
+                        ent_type = "DATE"
                     tags.append(token.ent_iob_ + "-" + ent_type)
             print(" ".join(tokens), file=f_retokenized)
             print(" ".join(tags), file=f_tags)
