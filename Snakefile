@@ -20,6 +20,8 @@ NLLB_CODES = {
     'yor': "yor_Latn",
 }
 
+
+ENTS = ["PER", "ORG", "LOC", "DATE"]
 TAG_LIST = [
     "O", "B-PER", "I-PER", "B-ORG", "I-ORG", "B-LOC", "I-LOC", "B-DATE",
     "I-DATE"]
@@ -185,26 +187,10 @@ rule evaluate_ner:
             golds = [line.strip().split() for line in f]
 
         score = metric.compute(predictions=outputs, references=golds)
+        for ent in ENTS:
+            score[ent]["number"] = int(score[ent]["number"])
 
         with open(output.report, "w") as f:
             print(json.dumps(score, indent=4), file=f)
         with open(output.score, "w") as f:
             print(score['overall_f1'], file=f)
-
-        f_output.close()
-        f_gold.close()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
