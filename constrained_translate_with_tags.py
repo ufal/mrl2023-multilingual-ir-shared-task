@@ -36,7 +36,7 @@ def inject_markup(input_str: str, max_len: int) -> Tuple[List[Tuple[int, int]], 
     Returns:
     List of positions and list of sentences with markup.
     """
-    tokens = input_str.split()
+    tokens = input_str.split(" ")
     positions = []
     sentences = []
     for start in range(len(tokens)):
@@ -64,7 +64,7 @@ def read_entities(file: IO[str]) -> List[List[Tuple[str, int, int]]]:
         entities = []
         current_entity = None
         current_start = None
-        for i, tag in enumerate(line.strip().split()):
+        for i, tag in enumerate(line.strip().split(" ")):
             if tag == "O":
                 if current_entity is not None:
                     entities.append((current_entity, current_start, i))
@@ -92,13 +92,13 @@ def format_entities(
     """
 
     for sentence, spans in zip(sentences, entities):
-        tokens = sentence.split()
+        tokens = sentence.split(" ")
         tags = ["O"] * len(tokens)
         for ent_type, start, end in spans:
             tags[start] = f"B-{ent_type}"
             for i in range(start + 1, end):
                 tags[i] = f"I-{ent_type}"
-        yield " ".join(tags)
+        yield tags
 
 
 @torch.no_grad()
@@ -129,7 +129,7 @@ def project_markup(
     for eng_sent, entities, tgt_sent in zip(eng_file, all_entities, tgt_file):
 
         markup_positions, markup_sentences = inject_markup(tgt_sent, max_span_len)
-        src_tokens = eng_sent.split()
+        src_tokens = eng_sent.split(" ")
 
         projected_entities = []
         for ent_type, start, end in entities:
@@ -175,14 +175,14 @@ def main():
     args = parser.parse_args()
 
     projected_tags = project_markup(
-        args.eng_file.readlines(),
-        args.ent_file.readlines(),
-        args.tgt_file.readlines(),
+        args.eng_file.read().split("\n"),
+        args.ent_file.read().split("\n"),
+        args.tgt_file.read().split("\n"),
         args.language,
         args.model, args.max_span_len)
 
     for tags in projected_tags:
-        print(tags)
+        print(" ".join(tags))
 
 
 if __name__ == "__main__":

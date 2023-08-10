@@ -152,9 +152,9 @@ rule project_from_eng:
     run:
         from constrained_translate_with_tags import project_markup
         tags = project_markup(
-            open(input.retokenized).readlines(),
-            open(input.tags).readlines(),
-            open(input.target_text).readlines(),
+            open(input.retokenized).read().splitlines(),
+            open(input.tags).read().splitlines(),
+            open(input.target_text).read().splitlines(),
             language=NLLB_CODES[wildcards.lang],
             model="ychenNLP/nllb-200-3.3B-easyproject",
             max_span_len=5)
