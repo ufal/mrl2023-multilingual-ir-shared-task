@@ -1,0 +1,9 @@
+snakemake
+torch
+transformers
+sentencepiece
+protobuf==3.20
+datasets
+spacy
+seqeval
+evaluate
