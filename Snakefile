@@ -6,18 +6,36 @@ def activate_logging():
         level=logging.INFO)
 
 MASAKHANER_LANGUAGES = [
-    "amh", "hau", "ibo", "kin", "kin", "luo", "pcm", "swa", "wol", "yor"]
+    "amh", "hau", "ibo", "kin", "lug", "luo", "pcm", "swa", "wol", "yor"]
+
+QA_LANGUAGES = [
+    "ar", "bn", "en", "fi", "id", "ko", "ru", "sw", "te",
+]
 
 NLLB_CODES = {
     "amh": "amh_Ethi",
+    "ar": "ara_Arab",
+    "bn": "ben_Beng",
+    "en": "eng_Latn",
+    "fi": "fin_Latn",
     "hau": "hau_Latn",
     'ibo': "ibo_Latn",
+    "id": "ind_Latn",
     'kin': "kin_Latn",
+    'lug': "lug_Latn",
     'luo': "luo_Latn",
-    'pcm': "pcm_Latn",
+    'ko': "kor_Hang",
+    'pcm': "eng_Latn",
+    'ru': "rus_Cyrl",
+    'spa': "spa_Latn",
     'swa': "swh_Latn",
+    'sw': "swh_Latn",
+    'tha': "tha_Thai",
+    'te': "tel_Telu",
+    'vie': "vie_Latn",
     'wol': "wol_Latn",
     'yor': "yor_Latn",
+    'zho': "zho_Hans"
 }
 
 
@@ -32,10 +50,16 @@ SPACY_TYPES = ["PERSON", "ORG", "LOC", "DATE", "GPE", "TIME"]
 rule all:
     input:
         #expand("masakhaner_data/{lang}/{split}.eng",
-        #       lang=MASAKHANER_LANGUAGES, split=["dev", "test", "train"]),
-        #expand("masakhaner_experiments/spacy/{lang}/{split}-retok.eng",
-        #       lang=MASAKHANER_LANGUAGES, split=["dev", "test"]),
-        "masakhaner_experiments/spacy/amh/test.score",
+        #       lang=MASAKHANER_LANGUAGES, split=["validation", "test", "train"]),
+        #expand("masakhaner_experiments/spacy/{lang}/{split}.score",
+        #       lang=MASAKHANER_LANGUAGES, split=["validation", "test"]),
+        expand("qa_data/{lang}/{type}.{file}.eng",
+               lang=QA_LANGUAGES,
+               type=["train", "validation", "test"],
+               file=["context", "question"]),
+        expand("qa_experiments/baseline/{lang}/{type}.eng-annotated",
+               lang=QA_LANGUAGES,
+               type=["validation", "test"]),
 
 
 rule download_masakhaner:
@@ -44,7 +68,8 @@ rule download_masakhaner:
         tags_file="masakhaner_data/{lang}/{split}.tags"
     run:
         import datasets
-        test_data = datasets.load_dataset("masakhaner", wildcards.lang)['test']
+        test_data = datasets.load_dataset(
+            "masakhaner", wildcards.lang)[wildcards.split]
         f_text = open(output.text_file, "w")
         f_tags = open(output.tags_file, "w")
         for item in test_data:
@@ -152,7 +177,7 @@ rule project_from_eng:
         mem="40G",
         cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1 --constraint='gpuram48G|gpuram40G'"
+        flags="--gres=gpu:1 --constraint='gpuram48G'"
     run:
         from constrained_translate_with_tags import project_markup
         tags = project_markup(
@@ -161,7 +186,7 @@ rule project_from_eng:
             open(input.target_text).read().splitlines(),
             language=NLLB_CODES[wildcards.lang],
             model="ychenNLP/nllb-200-3.3B-easyproject",
-            batch_size=16,
+            batch_size=8,
             max_span_len=5)
 
         with open(output[0], "w") as f:
@@ -194,3 +219,55 @@ rule evaluate_ner:
             print(json.dumps(score, indent=4), file=f)
         with open(output.score, "w") as f:
             print(score['overall_f1'], file=f)
+
+
+rule download_xtreme_up:
+    output:
+        expand("xtreme_up_v1.1/qa_in_lang/{split}/{lang}.jsonl",
+               split=['train', 'dev', 'test'],
+               lang=QA_LANGUAGES)
+    shell:
+        """
+        wget https://storage.googleapis.com/xtreme-up/xtreme-up-v1.1.jsonl.tgz
+        tar -xzf xtreme-up-v1.1.jsonl.tgz
+        """
+
+
+rule format_xtreme_up_qa:
+    input:
+        "xtreme_up_v1.1/qa_in_lang/{split}/{lang}.jsonl"
+    output:
+        question="qa_data/{lang}/{split}.question.txt",
+        context="qa_data/{lang}/{split}.context.txt",
+        anwser="qa_data/{lang}/{split}.answers",
+    run:
+        import json
+        with open(input[0]) as f:
+            data = [json.loads(line) for line in f]
+        with open(output.question, "w") as f_question, \
+             open(output.context, "w") as f_context, \
+             open(output.anwser, "w") as f_answer:
+            for item in data:
+                print(item['question'], file=f_question)
+                print(f"{item['title']}. {item['context']}", file=f_context)
+                print(item['target'], file=f_answer)
+
+
+rule baseline_qa:
+    input:
+        question="qa_data/{lang}/{split}.question.txt",
+        context="qa_data/{lang}/{split}.context.txt",
+    output:
+        "qa_experiments/baseline/{lang}/{split}.eng_annotated",
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    run:
+        import question_answering
+
+        results = question_answering.predict(
+            model="deepset/deberta-v3-base-squad2"
+            questions=open(input.question).read().splitlines(),
+            contexts=open(input.context).read().splitlines())
