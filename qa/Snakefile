@@ -1,0 +1,72 @@
+
+NLLB_CODES = {
+    "ar": "ara_Arab",
+    "bn": "ben_Beng",
+    "en": "eng_Latn",
+    "fi": "fin_Latn",
+    "id": "ind_Latn",
+    'ko': "kor_Hang",
+    'ru': "rus_Cyrl",
+    'sw': "swh_Latn",
+    'te': "tel_Telu",
+}
+
+
+rule all:
+    input:
+        expand("qa_data/{lang}/{type}.{file}.eng",
+               lang=QA_LANGUAGES,
+               type=["train", "validation", "test"],
+               file=["context", "question"]),
+
+
+rule download_xtreme_up:
+    output:
+        expand("xtreme_up_v1.1/qa_in_lang/{split}/{lang}.jsonl",
+               split=['train', 'dev', 'test'],
+               lang=QA_LANGUAGES)
+    shell:
+        """
+        wget https://storage.googleapis.com/xtreme-up/xtreme-up-v1.1.jsonl.tgz
+        tar -xzf xtreme-up-v1.1.jsonl.tgz
+        """
+
+
+rule format_xtreme_up_qa:
+    input:
+        "xtreme_up_v1.1/qa_in_lang/{split}/{lang}.jsonl"
+    output:
+        question="qa_data/{lang}/{split}.question.txt",
+        context="qa_data/{lang}/{split}.context.txt",
+        anwser="qa_data/{lang}/{split}.answers",
+    run:
+        import json
+        with open(input[0]) as f:
+            data = [json.loads(line) for line in f]
+        with open(output.question, "w") as f_question, \
+             open(output.context, "w") as f_context, \
+             open(output.anwser, "w") as f_answer:
+            for item in data:
+                print(item['question'], file=f_question)
+                print(f"{item['title']}. {item['context']}", file=f_context)
+                print(item['target'], file=f_answer)
+
+
+rule baseline_qa:
+    input:
+        question="qa_data/{lang}/{split}.question.eng",
+        context="qa_data/{lang}/{split}.context.eng",
+    output:
+        "qa_experiments/baseline/{lang}/{split}.eng_annotated",
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    run:
+        import question_answering
+
+        results = question_answering.predict(
+            model="deepset/deberta-v3-base-squad2",
+            questions=open(input.question).read().splitlines(),
+            contexts=open(input.context).read().splitlines())

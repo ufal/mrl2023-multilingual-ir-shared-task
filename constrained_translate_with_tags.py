@@ -107,7 +107,9 @@ def project_markup(
         ent_file: List[str],
         tgt_file: List[str],
         language: str,
+        src_lang: str = "eng_Latn",
         model: str = "ychenNLP/nllb-200-3.3B-easyproject",
+        tokenizer_model: str = "facebook/nllb-200-3.3B",
         batch_size: int = 32,
         max_span_len: int = 4,):
     """Project entity markup from target language to source language."""
@@ -116,9 +118,9 @@ def project_markup(
     logging.info("Using device: '%s'", device)
     logging.info("Loading tokenizer '%s'", model)
     tokenizer = AutoTokenizer.from_pretrained(
-        #model,
-        "facebook/nllb-200-3.3B",
-        src_lang="eng_Latn", tgt_lang=language,)
+        tokenizer_model,
+        src_lang=src_lang,
+        tgt_lang=language)
 
     logging.info("Loading model '%s'", model)
     model = AutoModelForSeq2SeqLM.from_pretrained(model).to(device).eval()
