@@ -214,6 +214,52 @@ rule project_from_eng:
                 print(" ".join(line), file=f)
 
 
+rule retokenize_english:
+    input:
+        "{dataset}/{lang}/{split}.eng"
+    output:
+        "{dataset}/{lang}/{split}.eng-retok"
+    resources:
+        mem="10G",
+        cpus_per_task=4,
+    shell:
+        """
+        sacremoses -l en -j 4 tokenize --xml-escape < {input} > {output}
+        """
+
+
+rule project_orig_to_eng:
+    input:
+        orig_text="{dataset}/{lang}/{split}.txt",
+        tags="{dataset}/{lang}/{split}.tags",
+        english="{dataset}/lang/{split}.eng-retok"
+    output:
+        "{dataset}/{lang}/{split}.eng-tags"
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1 --constraint='gpuram48G'"
+    run:
+        from constrained_translate_with_tags import project_markup
+        all_tags = project_markup(
+            open(input.orig_text).read().splitlines(),
+            open(input.tags).read().splitlines(),
+            open(input.english).read().splitlines(),
+            src_lang=NLLB_CODES[wildcards.lang],
+            tgt_lang="eng_Latn",
+            model="ychenNLP/nllb-200-3.3B-easyproject",
+            batch_size=8,
+            max_span_len=5)
+
+        with open(english, "r") as f_eng, \
+            open(output[0], "w") as f_out:
+            for eng_line, tags in zip(f_eng, all_tags):
+                for word, tag in zip(eng_line.strip().split(), tags):
+                    print(f"{word} {tag}", file=f_out)
+                print(file=f_out)
+
+
 rule evaluate_ner:
     input:
         system_output="{dataset}_experiments/{experiment}/{lang}/{split}.orig-tags",
