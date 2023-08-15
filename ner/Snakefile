@@ -1,25 +1,38 @@
+import logging
+
 MASAKHANER_LANGUAGES = [
     "amh", "hau", "ibo", "kin", "lug", "luo", "pcm", "swa", "wol", "yor"]
 
-QA_LANGUAGES = [
-    "ar", "bn", "en", "fi", "id", "ko", "ru", "sw", "te",
-]
+
+MASAKHANER2_LANGUAGES = [
+    "bam", "bbj", "ewe", "fon", "hau", "ibo", "kin", "lug", "luo", "mos",
+    "nya", "pcm", "sna", "swa", "tsn", "twi", "wol", "xho", "yor", "zul"]
 
 NLLB_CODES = {
     "amh": "amh_Ethi",
+    "bam": "bam_Latn",
+    "bbj": "fra_Latn", # MISSING
+    "ewe": "ewe_Latn",
+    "fon": "fon_Latn",
     "hau": "hau_Latn",
     'ibo': "ibo_Latn",
     'kin': "kin_Latn",
     'lug': "lug_Latn",
     'luo': "luo_Latn",
-    'pcm': "eng_Latn",
+    'mos': "mos_Latn",
+    'nya': "nya_Latn",
+    'pcm': "eng_Latn", # MISSING
     'spa': "spa_Latn",
+    'sna': "sna_Latn",
     'swa': "swh_Latn",
     'tha': "tha_Thai",
-    'vie': "vie_Latn",
+    'tsn': "tsn_Latn",
+    'twi': "twi_Latn",
     'wol': "wol_Latn",
+    'xho': "xho_Latn",
     'yor': "yor_Latn",
-    'zho': "zho_Hans"
+    'zho': "zho_Hans",
+    'zul': "zul_Latn",
 }
 
 
@@ -34,11 +47,12 @@ SPACY_TYPES = ["PERSON", "ORG", "LOC", "DATE", "GPE", "TIME"]
 
 rule all:
     input:
-        expand("masakhaner_data/{lang}/{split}.eng",
-               lang=MASAKHANER_LANGUAGES, split=["validation", "test", "train"]),
-        expand("masakhaner_experiments/spacy/{lang}/{split}.score",
-               lang=MASAKHANER_LANGUAGES, split=["validation", "test"]),
-
+        #expand("masakhaner_data/{lang}/train.eng-retok", lang=MASAKHANER_LANGUAGES),
+        expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
+               lang=MASAKHANER_LANGUAGES,
+               ner_method=["spacy", "tner-ontonotes5", "tner-conll2003"],
+               split=["validation", "test"]),
+        "masakhaner2_data/bam/test.txt"
 
 rule download_masakhaner:
     output:
@@ -48,6 +62,26 @@ rule download_masakhaner:
         import datasets
         test_data = datasets.load_dataset(
             "masakhaner", wildcards.lang)[wildcards.split]
+        f_text = open(output.text_file, "w")
+        f_tags = open(output.tags_file, "w")
+        for item in test_data:
+            f_text.write(
+                " ".join(item['tokens']) + "\n")
+            f_tags.write(
+                " ".join(TAG_LIST[idx] for idx in item['ner_tags']) + "\n")
+
+        f_text.close()
+        f_tags.close()
+
+
+rule download_masakhaner2:
+    output:
+        text_file="masakhaner2_data/{lang}/{split}.txt",
+        tags_file="masakhaner2_data/{lang}/{split}.tags"
+    run:
+        import datasets
+        test_data = datasets.load_dataset(
+            "masakhane/masakhaner2", wildcards.lang)[wildcards.split]
         f_text = open(output.text_file, "w")
         f_tags = open(output.tags_file, "w")
         for item in test_data:
