@@ -5,8 +5,9 @@ MASAKHANER_LANGUAGES = [
 
 
 MASAKHANER2_LANGUAGES = [
-    "bam", "bbj", "ewe", "fon", "hau", "ibo", "kin", "lug", "luo", "mos",
-    "nya", "pcm", "sna", "swa", "tsn", "twi", "wol", "xho", "yor", "zul"]
+    "bam", "bbj", "ewe", "fon", "hau", "ibo", "kin", "lug", "mos", "nya",
+    "pcm", "sna", "swa", "tsn", "twi", "wol", "xho", "yor", "zul"]
+
 
 NLLB_CODES = {
     "amh": "amh_Ethi",
@@ -47,12 +48,17 @@ SPACY_TYPES = ["PERSON", "ORG", "LOC", "DATE", "GPE", "TIME"]
 
 rule all:
     input:
-        #expand("masakhaner_data/{lang}/train.eng-retok", lang=MASAKHANER_LANGUAGES),
-        expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
-               lang=MASAKHANER_LANGUAGES,
+        #expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
+        #       lang=MASAKHANER_LANGUAGES,
+        #       ner_method=["spacy", "tner-ontonotes5", "tner-conll2003"],
+        #       split=["validation", "test"]),
+        expand("masakhaner2_experiments/{ner_method}/{lang}/{split}.score",
+               lang=MASAKHANER2_LANGUAGES,
                ner_method=["spacy", "tner-ontonotes5", "tner-conll2003"],
                split=["validation", "test"]),
-        "masakhaner2_data/bam/test.txt"
+        expand("masakhaner_data/{lng}/train.eng-tags", lng=MASAKHANER_LANGUAGES),
+        expand("masakhaner2_data/{lng}/train.eng-tags", lng=MASAKHANER2_LANGUAGES),
+
 
 rule download_masakhaner:
     output:
@@ -96,9 +102,9 @@ rule download_masakhaner2:
 
 rule translate_input_text:
     input:
-        src_text="{dataset}/{lang}/{split}.txt"
+        src_text="{dataset}_data/{lang}/{split}.txt"
     output:
-        tgt_text="{dataset}/{lang}/{split}.eng"
+        tgt_text="{dataset}_data/{lang}/{split}.eng"
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -131,10 +137,10 @@ rule translate_input_text:
 
 rule ner_with_spacy:
     input:
-        "masakhaner_data/{lang}/{split}.eng"
+        "{dataset}_data/{lang}/{split}.eng"
     output:
-        retokenized="masakhaner_experiments/spacy/{lang}/{split}-retok.eng",
-        tags="masakhaner_experiments/spacy/{lang}/{split}.eng-tags",
+        retokenized="{dataset}_experiments/spacy/{lang}/{split}-retok.eng",
+        tags="{dataset}_experiments/spacy/{lang}/{split}.eng-tags",
     resources:
         mem="10G",
         cpus_per_task=4,
@@ -182,10 +188,10 @@ rule ner_with_spacy:
 
 rule ner_with_tner_ontonotes5:
     input:
-        "masakhaner_data/{lang}/{split}.eng"
+        "{dataset}_data/{lang}/{split}.eng"
     output:
-        retokenized="masakhaner_experiments/tner-ontonotes5/{lang}/{split}-retok.eng",
-        tags="masakhaner_experiments/tner-ontonotes5/{lang}/{split}.eng-tags",
+        retokenized="{dataset}_experiments/tner-ontonotes5/{lang}/{split}-retok.eng",
+        tags="{dataset}_experiments/tner-ontonotes5/{lang}/{split}.eng-tags",
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -202,10 +208,10 @@ rule ner_with_tner_ontonotes5:
 
 rule ner_with_conll2003:
     input:
-        "masakhaner_data/{lang}/{split}.eng"
+        "{dataset}_data/{lang}/{split}.eng"
     output:
-        retokenized="masakhaner_experiments/tner-conll2003/{lang}/{split}-retok.eng",
-        tags="masakhaner_experiments/tner-conll2003/{lang}/{split}.eng-tags",
+        retokenized="{dataset}_experiments/tner-conll2003/{lang}/{split}-retok.eng",
+        tags="{dataset}_experiments/tner-conll2003/{lang}/{split}.eng-tags",
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -266,7 +272,7 @@ rule project_orig_to_eng:
     input:
         orig_text="{dataset}/{lang}/{split}.txt",
         tags="{dataset}/{lang}/{split}.tags",
-        english="{dataset}/lang/{split}.eng-retok"
+        english="{dataset}/{lang}/{split}.eng-retok"
     output:
         "{dataset}/{lang}/{split}.eng-tags"
     resources:
@@ -281,17 +287,15 @@ rule project_orig_to_eng:
             open(input.tags).read().splitlines(),
             open(input.english).read().splitlines(),
             src_lang=NLLB_CODES[wildcards.lang],
-            tgt_lang="eng_Latn",
+            language="eng_Latn",
             model="ychenNLP/nllb-200-3.3B-easyproject",
             batch_size=8,
             max_span_len=5)
 
-        with open(english, "r") as f_eng, \
+        with open(input.english, "r") as f_eng, \
             open(output[0], "w") as f_out:
             for eng_line, tags in zip(f_eng, all_tags):
-                for word, tag in zip(eng_line.strip().split(), tags):
-                    print(f"{word} {tag}", file=f_out)
-                print(file=f_out)
+                print(f"{eng_line.strip()}\t{' '.join(tags)}", file=f_out)
 
 
 rule evaluate_ner:

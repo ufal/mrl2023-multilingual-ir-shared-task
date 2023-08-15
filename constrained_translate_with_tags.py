@@ -148,6 +148,7 @@ def project_markup(
                 mt_tgt = markup_sentences[i:i + batch_size]
                 tokenized = tokenizer(
                     [src_sent] * len(mt_tgt), text_target=mt_tgt,
+                    padding=True, truncation=True,
                     return_tensors="pt").to(device)
 
                 logits = model(**tokenized).logits
