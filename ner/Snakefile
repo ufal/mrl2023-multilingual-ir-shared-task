@@ -136,12 +136,54 @@ rule ner_with_spacy:
                         ent_type = "LOC"
                     elif ent_type == "TIME":
                         ent_type = "DATE"
+                    elif ent_type == "FAC":
+                        ent_type = "LOC"
                     tags.append(token.ent_iob_ + "-" + ent_type)
             print(" ".join(tokens), file=f_retokenized)
             print(" ".join(tags), file=f_tags)
         f_retokenized.close()
         f_tags.close()
         logger.info("Done.")
+
+
+rule ner_with_tner_ontonotes5:
+    input:
+        "masakhaner_data/{lang}/{split}.eng"
+    output:
+        retokenized="masakhaner_experiments/tner-ontonotes5/{lang}/{split}-retok.eng",
+        tags="masakhaner_experiments/tner-ontonotes5/{lang}/{split}.eng-tags",
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    shell:
+        """
+        sacremoses -l en -j 8 tokenize --xml-escape < {input} > {output.retokenized}
+        deactivate || true
+        source ../tner_env/bin/activate
+        python3 apply_tner.py tner/roberta-large-ontonotes5 {output.retokenized} > {output.tags}
+        """
+
+
+rule ner_with_conll2003:
+    input:
+        "masakhaner_data/{lang}/{split}.eng"
+    output:
+        retokenized="masakhaner_experiments/tner-conll2003/{lang}/{split}-retok.eng",
+        tags="masakhaner_experiments/tner-conll2003/{lang}/{split}.eng-tags",
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1 --constraint='gpuram48G|gpuram40G|gpuram24G'"
+    shell:
+        """
+        sacremoses -l en -j 8 tokenize --xml-escape < {input} > {output.retokenized}
+        deactivate || true
+        source ../tner_env/bin/activate
+        python3 apply_tner.py tner/roberta-large-conll2003 {output.retokenized} > {output.tags}
+        """
 
 
 rule project_from_eng:
