@@ -329,9 +329,9 @@ rule evaluate_ner:
 rule collect_finetuning_data:
     input:
         expand("masakhaner_data/{lang}/{split}.eng-tags",
-               lang=MASAKHANER_LANGS, split=["train", "validation"]),
+               lang=MASAKHANER_LANGUAGES, split=["train", "validation"]),
         expand("masakhaner2_data/{lang}/{split}.eng-tags",
-               lang=MASAKHANER2_LANGS, split=["train", "validation"]),
+               lang=MASAKHANER2_LANGUAGES, split=["train", "validation"]),
     output:
         train_file="finetune_tner/train.tsv",
         validation_file="finetune_tner/validation.tsv",
@@ -353,7 +353,7 @@ rule format_finetuning_data:
     output:
         "finetune_tner/{split}.tner"
     run:
-        with open(input[0]) as f_input,
+        with open(input[0]) as f_input, \
             open(output[0], "w") as f_output:
             for line in f:
                 text, tags = line.strip().split('\t')
