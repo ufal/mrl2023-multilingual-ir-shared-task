@@ -240,15 +240,24 @@ rule project_from_eng:
         partition="gpu-troja,gpu-ms",
         flags="--gres=gpu:1 --constraint='gpuram48G'"
     run:
-        from constrained_translate_with_tags import project_markup
-        tags = project_markup(
-            open(input.retokenized).read().splitlines(),
-            open(input.tags).read().splitlines(),
-            open(input.target_text).read().splitlines(),
-            language=NLLB_CODES[wildcards.lang],
+        from constrained_translate_with_tags import (
+            project_markup, read_entities, format_entities)
+
+        with open(input.retokenized) as f_retok:
+            retokenized = f_retok.read().splitlines()
+        with open(input.tags) as f_tags:
+            eng_entities = read_entities(f_tags.read().splitlines())
+        with open(input.target_text) as f_tgt:
+            tgt_sentences = f_tgt.read().splitlines()
+
+        projected_entities = project_markup(
+            retokenized, eng_entities, tgt_sentences,
+            tgt_lang=NLLB_CODES[wildcards.lang],
             model="ychenNLP/nllb-200-3.3B-easyproject",
             batch_size=8,
             max_span_len=5)
+
+        tags = format_entities(tgt_sentences, projected_entities)
 
         with open(output[0], "w") as f:
             for line in tags:
@@ -282,20 +291,29 @@ rule project_orig_to_eng:
         partition="gpu-troja,gpu-ms",
         flags="--gres=gpu:1 --constraint='gpuram48G'"
     run:
-        from constrained_translate_with_tags import project_markup
-        all_tags = project_markup(
-            open(input.orig_text).read().splitlines(),
-            open(input.tags).read().splitlines(),
-            open(input.english).read().splitlines(),
+        from constrained_translate_with_tags import (
+            project_markup, read_entities, format_entities)
+
+        with open(input.orig_text) as f_orig:
+            orig_lines = f_orig.read().splitlines()
+        with open(input.tags) as f_tags:
+            entities = read_entities(f_tags.read().splitlines())
+        with open(input.english) as f_eng:
+            eng_lines = f_eng.read().splitlines()
+
+        projected_entities = project_markup(
+            orig_lines, entities, eng_lines,
             src_lang=NLLB_CODES[wildcards.lang],
-            language="eng_Latn",
+            tgt_lang="eng_Latn",
             model="ychenNLP/nllb-200-3.3B-easyproject",
             batch_size=8,
             max_span_len=5)
 
+        projected_tags = format_entities(tgt_sentences, projected_entities)
+
         with open(input.english, "r") as f_eng, \
             open(output[0], "w") as f_out:
-            for eng_line, tags in zip(f_eng, all_tags):
+            for eng_line, tags in zip(f_eng, projected_tags):
                 print(f"{eng_line.strip()}\t{' '.join(tags)}", file=f_out)
 
 
@@ -338,12 +356,14 @@ rule collect_finetuning_data:
         test_file="finetune_tner/test.tsv",
     shell:
         """
+        set -ex
         mkdir -p finetune_tner
         cat {input} | sed -e 's/B-PER/B-PERSON/g;s/I-PER/I-PERSON/g' | \
             shuf --random-source=<(yes 1348) > finetune_tner/all.tsv
         head -n 2000 finetune_tner/all.tsv > {output.test_file}
-        tail -n +4001 finetune_tner/all.tsv | head -n 2000 > {output.validation_file}
-        tail -n +6001 finetune_tner/all.tsv > {output.train_file}
+        head -n +4000 finetune_tner/all.tsv | tail -n 2000 > {output.validation_file}
+        tail -n +4001 finetune_tner/all.tsv > {output.train_file}
+        rm finetune_tner/all.tsv
         """
 
 
@@ -355,11 +375,14 @@ rule format_finetuning_data:
     run:
         with open(input[0]) as f_input, \
             open(output[0], "w") as f_output:
-            for line in f:
-                text, tags = line.strip().split('\t')
+            for line in f_input:
+                try:
+                    text, tags = line.strip().split('\t')
+                except ValueError:
+                    continue
                 for word, tag in zip(text.split(), tags.split()):
                     print(f'{word} {tag}', file=f_output)
-                print()
+                print(file=f_output)
 
 
 rule finetune_tner:
@@ -371,11 +394,13 @@ rule finetune_tner:
         "finetune_tner/best_model"
     resources:
         mem="40G",
-        cpus_per_task=8,
+        cpus_per_task=12,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1 --constraint='gpuram48G|gpuram40G'"
+        flags="--gres=gpu:4 --constraint='gpuram48G|gpuram40G'"
     shell:
         """
+        deactivate || true
+        source ../tner_env/bin/activate
         python3 custom_tner_trainer.py \
             finetune_tner \
             tner/roberta-large-ontonotes5 \

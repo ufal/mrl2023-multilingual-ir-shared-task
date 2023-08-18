@@ -50,7 +50,7 @@ def inject_markup(input_str: str, max_len: int) -> Tuple[List[Tuple[int, int]], 
     return positions, sentences
 
 
-def read_entities(file: IO[str]) -> List[List[Tuple[str, int, int]]]:
+def read_entities(file: List[str]) -> List[List[Tuple[str, int, int]]]:
     """Read entities as BIO tags and format as spans.
 
     Args:
@@ -103,10 +103,10 @@ def format_entities(
 
 @torch.no_grad()
 def project_markup(
-        eng_file: List[str],
-        ent_file: List[str],
-        tgt_file: List[str],
-        language: str,
+        eng_sentences: List[str],
+        all_entities: List[List[Tuple[str, int, int]]],
+        tgt_sentences: List[str],
+        tgt_lang: str,
         src_lang: str = "eng_Latn",
         model: str = "ychenNLP/nllb-200-3.3B-easyproject",
         tokenizer_model: str = "facebook/nllb-200-3.3B",
@@ -120,7 +120,7 @@ def project_markup(
     tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_model,
         src_lang=src_lang,
-        tgt_lang=language)
+        tgt_lang=tgt_lang)
 
     logging.info("Loading model '%s'", model)
     model = AutoModelForSeq2SeqLM.from_pretrained(model).to(device).eval()
@@ -129,7 +129,7 @@ def project_markup(
 
     all_entities = read_entities(ent_file)
     all_projected_entities = []
-    for eng_sent, entities, tgt_sent in zip(eng_file, all_entities, tgt_file):
+    for eng_sent, entities, tgt_sent in zip(eng_sentences, all_entities, tgt_sentences):
 
         markup_positions, markup_sentences = inject_markup(tgt_sent, max_span_len)
         src_tokens = eng_sent.split(" ")
@@ -166,7 +166,7 @@ def project_markup(
 
     logging.info("Finished translating %d sentences.", len(all_projected_entities))
     logging.info("Formatting entities as BIO tags...")
-    all_projected_tags = format_entities(tgt_file, all_projected_entities)
+    all_projected_tags = format_entities(tgt_sentences, all_projected_entities)
 
     logging.info("Done.")
     return all_projected_tags
