@@ -9,3 +9,5 @@ seqeval
 evaluate
 sacremoses
 wtpsplit
+jiwer
+sacrebleu

@@ -287,3 +287,29 @@ rule project_answer_from_eng:
             for span, tgt_sent in zip(projected_spans, tgt_sentences):
                 _, answer_start, answer_end = span[0]
                 print(tgt_sent[answer_start:answer_end], file=f_out)
+
+
+rule evaluate:
+    input:
+        correct="{dataset}_data/{lang}/{split}.answers",
+        predicted="{dataset}_experiments/baseline/{lang}/{split}.answers"
+    output:
+        "{dataset}_experiments/baseline/{lang}/{split}.score"
+    run:
+        import evaluate
+
+        cer_metric = evaluate.load("cer")
+        chrf_metric = evaluate.load("chrf")
+
+        with open(input.correct) as f_correct:
+            correct = f_correct.read().splitlines()
+        with open(input.predicted) as f_predicted:
+            predicted = f_predicted.read().splitlines()
+
+        cer_value = cer_metric.compute(predictions=predicted, references=correct)
+        chrf_value = chrf_metric.compute(
+            predictions=predicted,
+            references=[[x] for x in correct])
+
+        with open(output[0], "w") as f_out:
+            print(f"{cer_value},{chrf_value.score}", file=f_out)
