@@ -1,6 +1,11 @@
+import logging
+
+QA_LANGUAGES = [
+    "ar", "bn", "en", "fi", "id", 'ko', 'ru', 'sw', 'te'
+]
 
 NLLB_CODES = {
-    "ar": "ara_Arab",
+    "ar": "arb_Arab",
     "bn": "ben_Beng",
     "en": "eng_Latn",
     "fi": "fin_Latn",
