@@ -592,7 +592,7 @@ def main():
        epoch=5,                        # the total epoch (`L` in the figure)
        epoch_partial=1,                # the number of epoch at 1st stage (`M` in the figure)
        n_max_config=3,                 # the number of models to pass to 2nd stage (`K` in the figure)
-       batch_size=[64],
+       batch_size=64,
        gradient_accumulation_steps=[1, 2],
        crf=[True],
        lr=[1e-6, 1e-5],
@@ -603,3 +603,7 @@ def main():
     )
 
     searcher.train()
+
+
+if __name__ == '__main__':
+    main()
