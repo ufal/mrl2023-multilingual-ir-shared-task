@@ -96,19 +96,87 @@ rule sentence_split_context:
 
 rule translate_input_text:
     input:
-        question="qa_data/{lang}/{split}.question.eng",
-        context="qa_data/{lang}/{split}.context.eng",
+        src_text="{dataset}_data/{lang}/{split}.question.txt"
     output:
-        "qa_experiments/baseline/{lang}/{split}.eng_annotated",
+        tgt_text="{dataset}_data/{lang}/{split}.question.eng"
     resources:
         mem="40G",
         cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
         flags="--gres=gpu:1"
     run:
-        import question_answering
+        from transformers import pipeline
+        import torch
 
-        results = question_answering.predict(
-            model="deepset/deberta-v3-base-squad2",
-            questions=open(input.question).read().splitlines(),
-            contexts=open(input.context).read().splitlines())
+        logger = logging.getLogger("translate")
+        logger.setLevel(logging.INFO)
+
+        logger.info("Loading model.")
+        pipe = pipeline(
+            "translation", model="facebook/nllb-200-3.3B", device=0)
+        logger.info("Model loaded. Loading source text.")
+        with open(input.src_text) as f:
+            src_text = f.readlines()
+        logger.info("Source text loaded. Translating.")
+        translation = pipe(
+            src_text,
+            src_lang=NLLB_CODES[wildcards.lang],
+            tgt_lang="eng_Latn")
+        logger.info("Translation done. Writing to file.")
+        with open(output.tgt_text, "w") as f:
+            for line in translation:
+                print(line['translation_text'], file=f)
+        logger.info("Done.")
+
+
+rule translate_context_text:
+    input:
+        src_text="{dataset}_data/{lang}/{split}.context.split.txt"
+    output:
+        tgt_text="{dataset}_data/{lang}/{split}.context.eng",
+        tgt_sentence_offsets="{dataset}_data/{lang}/{split}.context.eng-offsets"
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    run:
+        from transformers import pipeline
+        import torch
+
+        logger = logging.getLogger("translate")
+        logger.setLevel(logging.INFO)
+
+        logger.info("Loading model.")
+        pipe = pipeline(
+            "translation", model="facebook/nllb-200-3.3B", device=0)
+        logger.info("Model loaded. Loading source text.")
+
+        context_offsets = [0]
+        src_text = []
+        with open(input.src_text) as f:
+            for context_line in f:
+                context_sentences = context_line.strip().split("\t")
+                src_text.extend(context_sentences)
+                context_offsets.append(context_offsets[-1] + len(context_sentences))
+
+        logger.info("Source context texts loaded. Translating.")
+        translation = pipe(
+            src_text,
+            src_lang=NLLB_CODES[wildcards.lang],
+            tgt_lang="eng_Latn")
+        logger.info("Translation done.")
+
+        logger.info("Reorganize back to context and write to file.")
+        with open(output.tgt_text, "w") as f_tgt, \
+                open(output.tgt_sentence_offsets, "w") as f_offsets:
+            for i in range(len(context_offsets) - 1):
+                tgt_context_sentences = [
+                    line['translation_text'] for line in
+                    translation[context_offsets[i]:context_offsets[i+1]]]
+                print(" ".join(tgt_context_sentences), file=f_tgt)
+                offsets = [0]
+                for sentence in tgt_context_sentences:
+                    offsets.append(offsets[-1] + len(sentence) + 1)
+                print(" ".join(map(str, offsets)), file=f_offsets)
+        logger.info("Done.")
