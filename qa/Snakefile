@@ -52,7 +52,44 @@ rule format_xtreme_up_qa:
                 print(item['target'], file=f_answer)
 
 
-rule baseline_qa:
+rule sentence_split_context:
+    input:
+        "qa_data/{lang}/{split}.context.txt"
+    output:
+        split="qa_data/{lang}/{split}.context.split.txt",
+        offsets="qa_data/{lang}/{split}.context.offsets.txt",
+    resources:
+        mem="10G",
+        cpus_per_task=2,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    run:
+        from wtpsplit import WtP
+        logger = logging.getLogger("split")
+        logger.setLevel(logging.INFO)
+        logger.info("Loading WtP sentence splitting model.")
+        model = WtP("wtp-canine-s-12l")
+        model.half().to("cuda")
+
+        lang = wildcards.lang
+        if lang == "sw":
+            lang = "en"
+
+        logger.info("Model loaded. Splitting sentences.")
+        with open(input[0]) as f_in, open(output.split, "w") as f_out, \
+                open(output.offsets, "w") as f_offsets:
+            for line in f_in:
+                sentences = model.split(
+                    line.strip(), lang_code=lang)
+                print("\t".join(sentences), file=f_out)
+                offsets = [0]
+                for sentence in sentences:
+                    offsets.append(offsets[-1] + len(sentence) + 1)
+                print(" ".join(map(str, offsets)), file=f_offsets)
+        logger.info("Done.")
+
+
+rule translate_input_text:
     input:
         question="qa_data/{lang}/{split}.question.eng",
         context="qa_data/{lang}/{split}.context.eng",
