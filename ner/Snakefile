@@ -309,7 +309,7 @@ rule project_orig_to_eng:
             batch_size=8,
             max_span_len=5)
 
-        projected_tags = format_entities(tgt_sentences, projected_entities)
+        projected_tags = format_entities(eng_sentences, projected_entities)
 
         with open(input.english, "r") as f_eng, \
             open(output[0], "w") as f_out:
