@@ -90,7 +90,8 @@ class Trainer:
         self.config = dict(
             dataset=dataset, dataset_split=dataset_split,
             dataset_name=dataset_name, local_dataset=local_dataset,
-            model=model.model_name, crf=crf, max_length=max_length, epoch=epoch, batch_size=batch_size,
+            model=model.model_name if model is not None else None,
+            crf=crf, max_length=max_length, epoch=epoch, batch_size=batch_size,
             lr=lr, random_seed=random_seed, gradient_accumulation_steps=gradient_accumulation_steps,
             weight_decay=weight_decay, lr_warmup_step_ratio=lr_warmup_step_ratio, max_grad_norm=max_grad_norm
         )
@@ -481,7 +482,8 @@ class GridSearcher:
             if not os.path.exists(pj(model_ckpt, f"epoch_{self.static_config['epoch']}")):
                 trainer = Trainer(checkpoint_dir=model_ckpt, disable_log=True)
                 trainer.train(epoch_save=1, optimizer_on_cpu=optimizer_on_cpu)
-            checkpoints.append(model_ckpcs = {})
+            checkpoints.append(model_ckpt)
+        metrics = {}
         for n, checkpoint_dir in enumerate(checkpoints):
             logging.info(f'## 2nd RUN (EVAL): Configuration {n}/{len(checkpoints)} ##')
             for checkpoint_dir_model in sorted(glob(pj(checkpoint_dir, 'epoch_*'))):
@@ -547,6 +549,8 @@ class GridSearcher:
         """ validate model checkpoint """
         if os.path.exists(pj(checkpoint_dir_model, 'eval', 'metric.json')):
             metric = json_load(pj(checkpoint_dir_model, 'eval', 'metric.json'))
+        else:
+            metric = {}
         if self.eval_config['dataset_split_valid'] in metric:
             tmp_metric = metric[self.eval_config['dataset_split_valid']]
         else:
