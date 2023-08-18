@@ -245,3 +245,45 @@ rule baseline_qa:
                 print(f"{context[sentence_start:sentence_end]}\t{sentence_id}\t"
                       f"{answer_start}\t{answer_end}\t", file=f_out)
         logger.info("Done.")
+
+
+rule project_answer_from_eng:
+    input:
+        orig_context_text="{dataset}_data/{lang}/{split}.context.split.txt",
+        eng_answers="{dataset}_experiments/baseline/{lang}/{split}.eng-annotated"
+    output:
+        "{dataset}_experiments/baseline/{lang}/{split}.answers"
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1 --constraint='gpuram48G'"
+    run:
+        from constrained_translate_with_tags import project_markup
+
+        with open(input.orig_context_text) as f_orig:
+            orig_context_text = [
+                line.strip().split("\t") for line in f_orig.readlines()]
+
+        eng_sentences = []
+        tgt_sentences = []
+        eng_spans = []
+        with open(input.eng_answers) as f_answers:
+            for line, orig_context in zip(f_answers, orig_context_text):
+                sentence, sentence_id, start, end = line.strip().split("\t")
+                eng_sentences.append(sentence)
+                eng_spans.append([("ANSWER", int(start), int(end))])
+                tgt_sentences.append(orig_context[int(sentence_id)])
+
+        projected_spans = project_markup(
+            eng_sentences, eng_spans, tgt_sentences,
+            tgt_lang=NLLB_CODES[wildcards.lang],
+            model="ychenNLP/nllb-200-3.3B-easyproject",
+            batch_size=8,
+            max_span_len=10,
+            is_token_based=False)
+
+        with open(output[0], "w") as f_out:
+            for span, tgt_sent in zip(projected_spans, tgt_sentences):
+                _, answer_start, answer_end = span[0]
+                print(tgt_sent[answer_start:answer_end], file=f_out)

@@ -26,7 +26,10 @@ logging.basicConfig(
     level=logging.INFO)
 
 
-def inject_markup(input_str: str, max_len: int) -> Tuple[List[Tuple[int, int]], List[str]]:
+def inject_markup(
+        input_str: str,
+        max_len: int,
+        is_token_based: bool) -> Tuple[List[Tuple[int, int]], List[str]]:
     """Inject markup tokens to get possible translation targets.
 
     Args:
@@ -36,7 +39,12 @@ def inject_markup(input_str: str, max_len: int) -> Tuple[List[Tuple[int, int]], 
     Returns:
     List of positions and list of sentences with markup.
     """
-    tokens = input_str.split(" ")
+    if is_token_based:
+        tokens = input_str.split(" ")
+        joiner = " "
+    else:
+        tokens = list(input_str)
+        joiner = ""
     positions = []
     sentences = []
     for start in range(len(tokens)):
@@ -45,8 +53,8 @@ def inject_markup(input_str: str, max_len: int) -> Tuple[List[Tuple[int, int]], 
                 break
             positions.append((start, end))
             sentences.append(
-                " ".join(tokens[:start] + ["["] +
-                         tokens[start:end] + ["]"] + tokens[end:]))
+                joiner.join(tokens[:start] + ["["] +
+                            tokens[start:end] + ["]"] + tokens[end:]))
     return positions, sentences
 
 
@@ -111,7 +119,8 @@ def project_markup(
         model: str = "ychenNLP/nllb-200-3.3B-easyproject",
         tokenizer_model: str = "facebook/nllb-200-3.3B",
         batch_size: int = 32,
-        max_span_len: int = 4,):
+        max_span_len: int = 4,
+        is_token_based: bool = True):
     """Project entity markup from target language to source language."""
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -127,16 +136,21 @@ def project_markup(
     xent = torch.nn.CrossEntropyLoss(reduction="none")
     logging.info("Translating...")
 
-    all_entities = read_entities(ent_file)
     all_projected_entities = []
     for eng_sent, entities, tgt_sent in zip(eng_sentences, all_entities, tgt_sentences):
 
-        markup_positions, markup_sentences = inject_markup(tgt_sent, max_span_len)
-        src_tokens = eng_sent.split(" ")
+        markup_positions, markup_sentences = inject_markup(
+            tgt_sent, max_span_len, is_token_based)
+        if is_token_based:
+            src_tokens = eng_sent.split(" ")
+            joiner = " "
+        else:
+            src_tokens = list(eng_sent)
+            joiner = ""
 
         projected_entities = []
         for ent_type, start, end in entities:
-            src_sent = " ".join(
+            src_sent = joiner.join(
                 src_tokens[:start] +
                 ["["] + src_tokens[start:end] + ["]"] +
                 src_tokens[end:])
@@ -165,11 +179,9 @@ def project_markup(
         all_projected_entities.append(projected_entities)
 
     logging.info("Finished translating %d sentences.", len(all_projected_entities))
-    logging.info("Formatting entities as BIO tags...")
-    all_projected_tags = format_entities(tgt_sentences, all_projected_entities)
 
     logging.info("Done.")
-    return all_projected_tags
+    return all_projected_entities
 
 
 def main():
