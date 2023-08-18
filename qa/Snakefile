@@ -19,10 +19,8 @@ NLLB_CODES = {
 
 rule all:
     input:
-        expand("qa_data/{lang}/{type}.{file}.eng",
-               lang=QA_LANGUAGES,
-               type=["train", "validation", "test"],
-               file=["context", "question"]),
+        expand("qa_experiments/baseline/{lang}/{split}.score",
+               lang=QA_LANGUAGES, split=["validation", "test"]),
 
 
 rule download_xtreme_up:
@@ -312,4 +310,4 @@ rule evaluate:
             references=[[x] for x in correct])
 
         with open(output[0], "w") as f_out:
-            print(f"{cer_value},{chrf_value.score}", file=f_out)
+            print(f"{cer_value},{chrf_value['score']}", file=f_out)
