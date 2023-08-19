@@ -278,7 +278,7 @@ rule project_answer_from_eng:
             tgt_lang=NLLB_CODES[wildcards.lang],
             model="ychenNLP/nllb-200-3.3B-easyproject",
             batch_size=8,
-            max_span_len=10,
+            max_span_len=100,
             is_token_based=False)
 
         with open(output[0], "w") as f_out:

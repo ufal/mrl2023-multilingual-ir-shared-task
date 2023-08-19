@@ -48,7 +48,11 @@ def inject_markup(
     positions = []
     sentences = []
     for start in range(len(tokens)):
+        if not is_token_based and start > 0 and tokens[start - 1].isalnum():
+            continue
         for end in range(start + 1, start + max_len):
+            if not is_token_based and end < len(tokens) and tokens[end].isalnum():
+                continue
             if end > len(tokens):
                 break
             positions.append((start, end))
