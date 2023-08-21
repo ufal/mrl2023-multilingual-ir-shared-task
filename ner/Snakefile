@@ -48,17 +48,17 @@ SPACY_TYPES = ["PERSON", "ORG", "LOC", "DATE", "GPE", "TIME"]
 
 rule all:
     input:
-        #expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
-        #       lang=MASAKHANER_LANGUAGES,
-        #       ner_method=["spacy", "tner-ontonotes5", "tner-conll2003"],
-        #       split=["validation", "test"]),
-        expand("masakhaner2_experiments/{ner_method}/{lang}/{split}.score",
-               lang=MASAKHANER2_LANGUAGES,
-               ner_method=["spacy", "tner-ontonotes5", "tner-conll2003"],
+        expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
+               lang=MASAKHANER_LANGUAGES,
+               ner_method=["spacy", "tner-ontonotes5", "tner-conll2003", "tner-finetuned"],
                split=["validation", "test"]),
-        expand("masakhaner_data/{lng}/train.eng-tags", lng=MASAKHANER_LANGUAGES),
-        expand("masakhaner2_data/{lng}/train.eng-tags", lng=MASAKHANER2_LANGUAGES),
-        "finetune_tner/best_model",
+        #expand("masakhaner2_experiments/{ner_method}/{lang}/{split}.score",
+        #       lang=MASAKHANER2_LANGUAGES,
+        #       ner_method=["spacy", "tner-ontonotes5", "tner-conll2003", "tner-finetuned"],
+        #       split=["validation", "test"]),
+        #expand("masakhaner_data/{lng}/train.eng-tags", lng=MASAKHANER_LANGUAGES),
+        #expand("masakhaner2_data/{lng}/train.eng-tags", lng=MASAKHANER2_LANGUAGES),
+        #"finetune_tner/best_model",
 
 
 rule download_masakhaner:
@@ -391,7 +391,7 @@ rule finetune_tner:
         validation_file="finetune_tner/validation.tner",
         test_file="finetune_tner/test.tner",
     output:
-        "finetune_tner/best_model"
+        directory("finetune_tner/best_model")
     resources:
         mem="40G",
         cpus_per_task=12,
@@ -407,4 +407,25 @@ rule finetune_tner:
             {input.train_file} \
             {input.validation_file} \
             {input.test_file}
+        """
+
+
+rule ner_with_tner_finetuned:
+    input:
+        data="{dataset}_data/{lang}/{split}.eng",
+        model="finetune_tner/best_model",
+    output:
+        retokenized="{dataset}_experiments/tner-finetuned/{lang}/{split}-retok.eng",
+        tags="{dataset}_experiments/tner-finetuned/{lang}/{split}.eng-tags",
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    shell:
+        """
+        sacremoses -l en -j 8 tokenize --xml-escape < {input.data} > {output.retokenized}
+        deactivate || true
+        source ../tner_env/bin/activate
+        python3 apply_tner.py {input.model} {output.retokenized} > {output.tags}
         """
