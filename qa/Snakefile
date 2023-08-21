@@ -19,7 +19,7 @@ NLLB_CODES = {
 
 rule all:
     input:
-        expand("qa_experiments/baseline/{lang}/{split}.score",
+        expand("qa_experiments/baseline-deberta/{lang}/{split}.score",
                lang=QA_LANGUAGES, split=["validation", "test"]),
 
 
@@ -194,63 +194,39 @@ rule baseline_qa:
         partition="gpu-troja,gpu-ms",
         flags="--gres=gpu:1"
     run:
-        from transformers import pipeline
+        from question_answering import question_answering
 
-        logger = logging.getLogger("qa")
-        logger.setLevel(logging.INFO)
+        question_answering(
+            input.question, input.context, input.context_offsets,
+            output[0], "deepset/roberta-large-squad2")
 
-        logger.info("Loading data.")
-        with open(input.context_offsets) as f_offsets:
-            context_offsets = [
-                list(map(int, line.strip().split(" ")))
-                for line in f_offsets]
-        with open(input.context) as f_context:
-            contexts = f_context.read().splitlines()
-        with open(input.question) as f_question:
-            questions = f_question.read().splitlines()
 
-        logger.info("Loading model.")
-        qa = pipeline(
-            "question-answering",
-            model="deepset/roberta-large-squad2")
+rule baseline_deberta:
+    input:
+        question="{dataset}_data/{lang}/{split}.question.eng",
+        context="{dataset}_data/{lang}/{split}.context.eng",
+        context_offsets="{dataset}_data/{lang}/{split}.context.eng-offsets"
+    output:
+        "{dataset}_experiments/baseline-deberta/{lang}/{split}.eng-annotated",
+    resources:
+        mem="10G",
+        cpus_per_task=2,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    run:
+        from question_answering import question_answering
 
-        logger.info("Model loaded. Formatting inputs.")
-        inputs = [
-            {"question": question, "context": context}
-            for question, context in zip(questions, contexts)]
-
-        logger.info("Running QA inference.")
-        results = qa(inputs)
-
-        logger.info("Writing results to file.")
-        with open(output[0], "w") as f_out:
-            for result, context, sent_offsets in zip(
-                    results, contexts, context_offsets):
-                answer_start = result["start"]
-                answer_end = result["end"]
-                sentence_id = 0
-                while sent_offsets[sentence_id + 1] <= answer_start:
-                    sentence_id += 1
-                sentence_start = sent_offsets[sentence_id]
-                sentence_end = sent_offsets[sentence_id + 1]
-                answer_start -= sentence_start
-                answer_end -= sentence_start
-
-                # Here, we assume the answer do not cross the sentence boundary.
-                answer_end = min(
-                    answer_end, len(context[sentence_start:sentence_end]))
-                sentence = context[sentence_start:sentence_end]
-                print(f"{context[sentence_start:sentence_end]}\t{sentence_id}\t"
-                      f"{answer_start}\t{answer_end}\t", file=f_out)
-        logger.info("Done.")
+        question_answering(
+            input.question, input.context, input.context_offsets,
+            output[0], "deepset/deberta-v3-large-squad2")
 
 
 rule project_answer_from_eng:
     input:
         orig_context_text="{dataset}_data/{lang}/{split}.context.split.txt",
-        eng_answers="{dataset}_experiments/baseline/{lang}/{split}.eng-annotated"
+        eng_answers="{dataset}_experiments/{method}/{lang}/{split}.eng-annotated"
     output:
-        "{dataset}_experiments/baseline/{lang}/{split}.answers"
+        "{dataset}_experiments/{method}/{lang}/{split}.answers"
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -290,9 +266,9 @@ rule project_answer_from_eng:
 rule evaluate:
     input:
         correct="{dataset}_data/{lang}/{split}.answers",
-        predicted="{dataset}_experiments/baseline/{lang}/{split}.answers"
+        predicted="{dataset}_experiments/{method}/{lang}/{split}.answers"
     output:
-        "{dataset}_experiments/baseline/{lang}/{split}.score"
+        "{dataset}_experiments/{method}/{lang}/{split}.score"
     run:
         import evaluate
 

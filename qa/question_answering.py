@@ -3,43 +3,57 @@ from typing import List
 from transformers import pipeline
 
 
-def inference(
-        model_name: str,
-        questions: List[str],
-        contexts: List[str]) -> List[str]:
-    """Inference with a question answering model.
+def question_answering(
+        question_file: str,
+        context_file: str,
+        context_offsets_file: str,
+        output_file: str,
+        model_name: str = "deepset/roberta-large-squad2") -> List[str]:
+    #output:
+        #"{dataset}_experiments/baseline/{lang}/{split}.eng-annotated",
 
-    The answers are marked in the contexts using square brackters, so it can
-    get later translated. Original square brackets are replaced with normal
-    brackets.
+    logger = logging.getLogger("qa")
+    logger.setLevel(logging.INFO)
 
-    Args:
-    model_name: Name of the model to use.
-    questions: List of questions.
-    contexts: List of contexts.
+    logger.info("Loading data.")
+    with open(context_offset_file) as f_offsets:
+        context_offsets = [
+            list(map(int, line.strip().split(" ")))
+            for line in f_offsets]
+    with open(context_file) as f_context:
+        contexts = f_context.read().splitlines()
+    with open(question_file) as f_question:
+        questions = f_question.read().splitlines()
 
-    Returns:
-    Annotated contexts.
-    """
-
-    # Load the model.
+    logger.info("Loading model.")
     qa = pipeline("question-answering", model=model_name)
 
-    # Format data for the model.
+    logger.info("Model loaded. Formatting inputs.")
     inputs = [
         {"question": question, "context": context}
         for question, context in zip(questions, contexts)]
 
-    # Run inference.
-    model_results = qa(inputs)
+    logger.info("Running QA inference.")
+    results = qa(inputs)
 
-    # Format the results.
-    results = []
-    for context, model_result in zip(contexts, model_results):
-        start = model_result["start"]
-        end = model_result["end"]
-        context = context.replace("[", "(").replace("]", ")")
-        results.append(
-            context[:start] + "[" + context[start:end] + "]" + context[end:])
+    logger.info("Writing results to file.")
+    with open(output_file, "w") as f_out:
+        for result, context, sent_offsets in zip(
+                results, contexts, context_offsets):
+            answer_start = result["start"]
+            answer_end = result["end"]
+            sentence_id = 0
+            while sent_offsets[sentence_id + 1] <= answer_start:
+                sentence_id += 1
+            sentence_start = sent_offsets[sentence_id]
+            sentence_end = sent_offsets[sentence_id + 1]
+            answer_start -= sentence_start
+            answer_end -= sentence_start
 
-    return results
+            # Here, we assume the answer do not cross the sentence boundary.
+            answer_end = min(
+                answer_end, len(context[sentence_start:sentence_end]))
+            sentence = context[sentence_start:sentence_end]
+            print(f"{context[sentence_start:sentence_end]}\t{sentence_id}\t"
+                  f"{answer_start}\t{answer_end}\t", file=f_out)
+    logger.info("Done.")
