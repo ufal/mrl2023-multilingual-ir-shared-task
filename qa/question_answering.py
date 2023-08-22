@@ -1,4 +1,5 @@
 from typing import List
+import logging
 
 from transformers import pipeline
 
@@ -16,7 +17,7 @@ def question_answering(
     logger.setLevel(logging.INFO)
 
     logger.info("Loading data.")
-    with open(context_offset_file) as f_offsets:
+    with open(context_offsets_file) as f_offsets:
         context_offsets = [
             list(map(int, line.strip().split(" ")))
             for line in f_offsets]

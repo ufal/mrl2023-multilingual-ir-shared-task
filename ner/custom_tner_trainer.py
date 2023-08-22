@@ -2,12 +2,17 @@
 
 """Training scripts for finetuning TNER.
 
-This script is based on the following script (under MIT license):
-    https://github.com/asahi417/tner/blob/master/tner/ner_trainer.py
+This script is based on the following scripts (under MIT license):
+    * https://github.com/asahi417/tner/blob/master/tner/ner_trainer.py
+	* https://github.com/asahi417/tner/blob/master/tner/get_dataset.py
 
 It modifies the original Trainer class , so that instead of initializing the
 model from a pre-trained BERT-like model, it starts with an already trained
 TNER models.
+
+The `load_conll_format_file` is just copied (and simplified) from the original
+script, so it can be used in the custom `get_dataset` fuction than uses the
+provided `label2id` dictionary.
 """
 
 import argparse
@@ -22,13 +27,80 @@ from os.path import join as pj
 from typing import List, Dict
 from itertools import product
 from distutils.dir_util import copy_tree
+from unicodedata import normalize
+from itertools import chain
 
 import torch
 import transformers
 
-from tner import get_dataset
 from tner import TransformersNER
 from tner.util import json_save, json_load, get_random_string
+
+
+def load_conll_format_file(data_path: str, label2id: Dict = None):
+    """ load dataset from local IOB format file
+
+    @param data_path: path to iob file
+    @param label2id: [optional] dictionary of label2id (generate from dataset as default )
+    @return: (data, label2id)
+        - data: a dictionary of {"tokens": [list of tokens], "tags": [list of tags]}
+    """
+    inputs, labels, seen_entity = [], [], []
+    with open(data_path, 'r') as f:
+        sentence, entity = [], []
+        for n, line_raw in enumerate(f):
+            line = normalize('NFKD', line_raw).strip()
+            if len(line) == 0 or line.startswith("-DOCSTART-"):
+                if len(sentence) != 0:
+                    assert len(sentence) == len(entity)
+                    inputs.append(sentence)
+                    labels.append(entity)
+                    sentence, entity = [], []
+            else:
+                ls = line.split()
+                if len(ls) < 2:
+                    if line_raw.startswith('O'):
+                        logging.warning(f'skip {ls} (line {n} of file {data_path}): '
+                                        f'missing token (should be word and tag separated by '
+                                        f'a half-space, eg. `London B-LOC`)')
+                        continue
+                    else:
+                        ls = ['', ls[0]]
+                # Examples could have no label for mode = "test"
+                word, tag = ls[0], ls[-1]
+                sentence.append(word)
+                entity.append(tag)
+
+        if len(sentence) != 0:
+            assert len(sentence) == len(entity)
+            inputs.append(sentence)
+            labels.append(entity)
+
+    all_labels = sorted(list(set(list(chain(*labels)))))
+    labels_not_found = [i for i in all_labels if i not in label2id]
+    if len(labels_not_found) > 0:
+        logging.warning(f'found entities not in the label2id (label2id was updated):\n\t - {labels_not_found}')
+        label2id.update({i: len(label2id) + n for n, i in enumerate(labels_not_found)})
+    assert all(i in label2id for i in all_labels), \
+        f"label2id is not covering all the entity \n \t- {label2id} \n \t- {all_labels}"
+    keys = label2id.copy().keys()
+    for l in keys:
+        if l.startswith('B'):
+            entity = l[2:]
+            if 'I-'+entity not in label2id:
+                label2id.update({'I-'+entity: len(label2id)})
+                logging.warning(f'found entities without I label2id (label2id was updated):\n\t - {entity}')
+    labels = [[label2id[__l] for __l in _l] for _l in labels]
+    data = {"tokens": inputs, "tags": labels}
+    return data
+
+
+def get_dataset(path_dict, label2id):
+    output = {}
+    for split, path in path_dict.items():
+        data = load_conll_format_file(path, label2id)
+        output[split] = data
+    return output
 
 
 class Trainer:
@@ -123,14 +195,11 @@ class Trainer:
         for k, v in self.config.items():
             logging.info(f'\t * {k}: {v}')
 
-        # load dataset
-        data, label2id = get_dataset(
-            dataset=self.config['dataset'],
-            local_dataset=self.config['local_dataset'],
-            dataset_name=self.config['dataset_name'],
-            concat_label2id=self.model.label2id if self.model is not None else None,
-            use_auth_token=use_auth_token
-        )
+        # Here, the call of the original `get_dataset` function is replaced by
+        # a custom function from this file.
+        data = get_dataset(
+            self.config['local_dataset'],
+            label2id=self.model.label2id)
         assert self.config['dataset_split'] in data, f"split {self.config['dataset_split']} is not in {data.keys()}"
         self.dataset = data[self.config['dataset_split']]
         self.step_per_epoch = int(
@@ -599,8 +668,8 @@ def main():
        batch_size=64,
        gradient_accumulation_steps=[1],
        crf=[True],
-       lr=[1e-5],
-       weight_decay=[None, 1e-7],
+       lr=[1e-5, 1e-6],
+       weight_decay=[None, 1e-7, 1e-6],
        random_seed=[42],
        lr_warmup_step_ratio=[None],
        max_grad_norm=[5, 10]

@@ -58,7 +58,7 @@ rule all:
         #       split=["validation", "test"]),
         #expand("masakhaner_data/{lng}/train.eng-tags", lng=MASAKHANER_LANGUAGES),
         #expand("masakhaner2_data/{lng}/train.eng-tags", lng=MASAKHANER2_LANGUAGES),
-        #"finetune_tner/best_model",
+        "finetune_tner/best_model",
 
 
 rule download_masakhaner:
@@ -396,7 +396,8 @@ rule finetune_tner:
         mem="40G",
         cpus_per_task=12,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:4 --constraint='gpuram48G|gpuram40G'"
+        flags="--gres=gpu:4",
+        #flags="--gres=gpu:4 --constraint='gpuram48G|gpuram40G'"
     shell:
         """
         deactivate || true
