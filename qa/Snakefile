@@ -32,6 +32,7 @@ rule download_xtreme_up:
         """
         wget https://storage.googleapis.com/xtreme-up/xtreme-up-v1.1.jsonl.tgz
         tar -xzf xtreme-up-v1.1.jsonl.tgz
+        rm xtreme-up-v1.1.jsonl.tgz
         """
 
 
