@@ -1,5 +1,16 @@
 **/*.swp
 **/*.swo
+**/#*#
+**/.snakemake
+**/logs
+
+# Directories containing datasets and experiments
+ner/finetune_tner/
+ner/masakhaner2_data/
+ner/masakhaner2_experiments/
+qa/qa_data/
+qa/qa_experiments/
+qa/xtreme_up_v1.1/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
