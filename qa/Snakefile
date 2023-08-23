@@ -304,3 +304,37 @@ rule evaluate:
 
         with open(output[0], "w") as f_out:
             print(f"{cer_value},{chrf_value['score']}", file=f_out)
+
+
+rule reference_answer_offsets:
+    input:
+        orig_context_text="{dataset}_data/{lang}/{split}.context.split.txt",
+        orig_answers="{dataset}_data/{lang}/{split}.answers"
+    output:
+        "{dataset}_data/{lang}/{split}.ref-offsets"
+    run:
+        from get_answer_offsets import get_answer_offsets
+
+        with open(input.orig_context_text) as f_orig, \
+                open(input.orig_answers) as f_answers, \
+                open(output[0], "w") as f_out:
+            for orig_context, orig_answers in zip(f_orig, f_answers):
+                offsets = get_answer_offsets(orig_context.strip(), orig_answers.strip())
+                print("\t".join(map(str, offsets)), file=f_out)
+
+
+rule reconstruct_answer_from_offsets:
+    input:
+        orig_context_text="{dataset}_data/{lang}/{split}.context.split.txt",
+        ref_offsets="{dataset}_data/{lang}/{split}.ref-offsets"
+    output:
+        "{dataset}_data/{lang}/{split}.reconstructed"
+    run:
+        from get_answer_offsets import reconstruct_answer
+
+        with open(input.orig_context_text) as f_orig, \
+                open(input.ref_offsets) as f_offsets, \
+                open(output[0], "w") as f_out:
+            for orig_context, offsets in zip(f_orig, f_offsets):
+                offsets = list(map(int, offsets.strip().split("\t")))
+                print(reconstruct_answer(orig_context.strip(), offsets), file=f_out)
