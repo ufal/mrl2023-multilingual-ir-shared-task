@@ -138,7 +138,7 @@ rule translate_context_text:
         mem="40G",
         cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1"
+        flags="--gres=gpu:1 --constraint='gpuram16G|gpuram24G|gpuram40G|gpuram48G'"
     run:
         from transformers import pipeline
         import torch
@@ -179,7 +179,6 @@ rule translate_context_text:
                     offsets.append(offsets[-1] + len(sentence) + 1)
                 print(" ".join(map(str, offsets)), file=f_offsets)
         logger.info("Done.")
-
 
 
 rule baseline_qa:
@@ -225,6 +224,8 @@ rule baseline_deberta:
 rule project_answer_from_eng:
     input:
         orig_context_text="{dataset}_data/{lang}/{split}.context.split.txt",
+        eng_context_text="{dataset}_data/{lang}/{split}.context.eng",
+        eng_context_offsets="{dataset}_data/{lang}/{split}.context.eng-offsets",
         eng_answers="{dataset}_experiments/{method}/{lang}/{split}.eng-annotated"
     output:
         "{dataset}_experiments/{method}/{lang}/{split}.answers"
@@ -232,23 +233,38 @@ rule project_answer_from_eng:
         mem="40G",
         cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1 --constraint='gpuram48G'"
+        flags="--gres=gpu:1 --constraint='gpuram48G|gpuram40G|gpuram24G'"
     run:
         from constrained_translate_with_tags import project_markup
 
         with open(input.orig_context_text) as f_orig:
             orig_context_text = [
                 line.strip().split("\t") for line in f_orig.readlines()]
+        with open(input.eng_context_text) as f_eng, \
+                 open(input.eng_context_offsets) as f_offsets:
+            eng_context_text = []
+            for text_line, offsets_line in zip(f_eng, f_offsets):
+                offsets = list(map(int, offsets_line.strip().split(" ")))
+                text_line = text_line.strip()
+                eng_context_text.append(
+                    [text_line[start:end] for start, end in zip(offsets[:-1], offsets[1:])])
 
         eng_sentences = []
         tgt_sentences = []
         eng_spans = []
         with open(input.eng_answers) as f_answers:
-            for line, orig_context in zip(f_answers, orig_context_text):
-                sentence, sentence_id, start, end = line.strip().split("\t")
-                eng_sentences.append(sentence)
-                eng_spans.append([("ANSWER", int(start), int(end))])
-                tgt_sentences.append(orig_context[int(sentence_id)])
+            for line, orig_context, eng_context in zip(f_answers, orig_context_text, eng_context_text):
+                start_sentence_id, answer_start_in_sent, end_sentence_id, answer_end_in_sent = \
+                    map(int, line.strip().split("\t"))
+
+                tmp_eng_sentences = eng_context[start_sentence_id:end_sentence_id]
+                answer_end = (
+                    sum(len(sent) for sent in tmp_eng_sentences[:-1]) # all previous sentences
+                    + answer_end_in_sent)
+
+                eng_sentences.append("".join(tmp_eng_sentences))
+                eng_spans.append([("ANSWER", answer_start_in_sent, answer_end)])
+                tgt_sentences.append("".join(orig_context[start_sentence_id:end_sentence_id]))
 
         projected_spans = project_markup(
             eng_sentences, eng_spans, tgt_sentences,

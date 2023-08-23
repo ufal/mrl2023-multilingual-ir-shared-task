@@ -43,18 +43,20 @@ def question_answering(
                 results, contexts, context_offsets):
             answer_start = result["start"]
             answer_end = result["end"]
-            sentence_id = 0
-            while sent_offsets[sentence_id + 1] <= answer_start:
-                sentence_id += 1
-            sentence_start = sent_offsets[sentence_id]
-            sentence_end = sent_offsets[sentence_id + 1]
-            answer_start -= sentence_start
-            answer_end -= sentence_start
+            start_sentence_id = 0
+            while sent_offsets[start_sentence_id + 1] <= answer_start:
+                start_sentence_id += 1
+            end_sentence_id = start_sentence_id
+            while sent_offsets[end_sentence_id + 1] <= answer_end:
+                end_sentence_id += 1
+            start_sentence_start = sent_offsets[start_sentence_id]
+            end_sentence_start = sent_offsets[end_sentence_id]
+            end_sentence_end = sent_offsets[end_sentence_id + 1]
+            in_sent_answer_start = answer_start - start_sentence_start
+            in_sent_answer_end = answer_end - end_sentence_start
 
-            # Here, we assume the answer do not cross the sentence boundary.
-            answer_end = min(
-                answer_end, len(context[sentence_start:sentence_end]))
-            sentence = context[sentence_start:sentence_end]
-            print(f"{context[sentence_start:sentence_end]}\t{sentence_id}\t"
-                  f"{answer_start}\t{answer_end}\t", file=f_out)
+            print(context[start_sentence_start:end_sentence_end])
+            print(context[answer_start:answer_end])
+            assert context[answer_start:answer_end] in context[start_sentence_start:end_sentence_end]
+            print(f"{start_sentence_id}\t{in_sent_answer_start}\t{end_sentence_id + 1}\t{in_sent_answer_end}", file=f_out)
     logger.info("Done.")
