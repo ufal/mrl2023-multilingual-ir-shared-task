@@ -48,10 +48,10 @@ SPACY_TYPES = ["PERSON", "ORG", "LOC", "DATE", "GPE", "TIME"]
 
 rule all:
     input:
-        expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
-               lang=MASAKHANER_LANGUAGES,
-               ner_method=["spacy", "tner-ontonotes5", "tner-conll2003", "tner-finetuned"],
-               split=["validation", "test"]),
+        #expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
+        #       lang=MASAKHANER_LANGUAGES,
+        #       ner_method=["spacy", "tner-ontonotes5", "tner-conll2003", "tner-finetuned"],
+        #       split=["validation", "test"]),
         #expand("masakhaner2_experiments/{ner_method}/{lang}/{split}.score",
         #       lang=MASAKHANER2_LANGUAGES,
         #       ner_method=["spacy", "tner-ontonotes5", "tner-conll2003", "tner-finetuned"],
@@ -59,6 +59,14 @@ rule all:
         #expand("masakhaner_data/{lng}/train.eng-tags", lng=MASAKHANER_LANGUAGES),
         #expand("masakhaner2_data/{lng}/train.eng-tags", lng=MASAKHANER2_LANGUAGES),
         "finetune_tner/best_model",
+        expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
+               lang=MASAKHANER_LANGUAGES,
+               ner_method=["tner-finetuned"],
+               split=["validation", "test"]),
+        expand("masakhaner2_experiments/{ner_method}/{lang}/{split}.score",
+               lang=MASAKHANER2_LANGUAGES,
+               ner_method=["tner-finetuned"],
+               split=["validation", "test"]),
 
 
 rule download_masakhaner:
@@ -284,7 +292,7 @@ rule project_orig_to_eng:
         tags="{dataset}/{lang}/{split}.tags",
         english="{dataset}/{lang}/{split}.eng-retok"
     output:
-        "{dataset}/{lang}/{split}.eng-tags"
+        protected("{dataset}/{lang}/{split}.eng-tags")
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -396,8 +404,8 @@ rule finetune_tner:
         mem="40G",
         cpus_per_task=12,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:4",
-        #flags="--gres=gpu:4 --constraint='gpuram48G|gpuram40G'"
+        #flags="--gres=gpu:4",
+        flags="--gres=gpu:2 --constraint='gpuram48G|gpuram40G'"
     shell:
         """
         deactivate || true

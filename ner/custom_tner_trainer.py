@@ -31,6 +31,7 @@ from unicodedata import normalize
 from itertools import chain
 
 import torch
+from tner.util import span_f1
 import transformers
 
 from tner import TransformersNER
@@ -630,15 +631,29 @@ class GridSearcher:
             )
             cache_file_feature = f"{cache_prefix}.{tmp_model.crf_layer is not None}.{self.eval_config['dataset_split_valid']}.pkl"
             cache_file_prediction = pj(checkpoint_dir_model, "eval", f"prediction.{self.eval_config['dataset_split_valid']}.json")
-            tmp_metric = tmp_model.evaluate(
-                dataset=self.static_config['dataset'],
-                local_dataset=self.static_config['local_dataset'],
-                dataset_name=self.static_config['dataset_name'],
+
+            ###### COPIED FROM EVALUATE ######
+            dataset_split = self.eval_config['dataset_split_valid']
+            tmp_model.eval()
+            data = get_dataset(
+                self.static_config['local_dataset'],
+                label2id=tmp_model.label2id)
+            assert dataset_split in data, f'{dataset_split} is not in {data.keys()}'
+            output = tmp_model.predict(
+                inputs=data[dataset_split]['tokens'],
+                labels=data[dataset_split]['tags'],
                 batch_size=self.batch_size_eval,
-                dataset_split=self.eval_config['dataset_split_valid'],
                 cache_file_feature=cache_file_feature,
-                cache_file_prediction=cache_file_prediction
+                cache_file_prediction=cache_file_prediction,
+                separator=' '
             )
+            tmp_metric =  span_f1(
+                output['prediction'], output['label'],
+                span_detection_mode=False,
+                return_ci=False,
+                unification_by_shared_label=True)
+            ###### END OF COPY ######
+
             metric[self.eval_config['dataset_split_valid']] = tmp_metric
         return metric, tmp_metric
 
@@ -662,16 +677,16 @@ def main():
        checkpoint_dir=args.checkpoint_dir,
        local_dataset=local_dataset,
        model=args.init_model,
-       epoch=5,                        # the total epoch (`L` in the figure)
-       epoch_partial=1,                # the number of epoch at 1st stage (`M` in the figure)
+       epoch=20,                       # the total epoch (`L` in the figure)
+       epoch_partial=2,                # the number of epoch at 1st stage (`M` in the figure)
        n_max_config=3,                 # the number of models to pass to 2nd stage (`K` in the figure)
-       batch_size=64,
+       batch_size=128,
        gradient_accumulation_steps=[1],
        crf=[True],
-       lr=[1e-5, 1e-6],
+       lr=[1e-4, 1e-5, 1e-6],
        weight_decay=[None, 1e-7, 1e-6],
        random_seed=[42],
-       lr_warmup_step_ratio=[None],
+       lr_warmup_step_ratio=[None, 0.1],
        max_grad_norm=[5, 10]
     )
 
