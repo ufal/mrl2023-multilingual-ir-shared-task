@@ -1,7 +1,8 @@
 from typing import List
 import logging
 
-from transformers import pipeline
+import torch
+from transformers import pipeline, AutoModelForQuestionAnswering, AutoTokenizer
 
 
 def question_answering(
@@ -27,7 +28,11 @@ def question_answering(
         questions = f_question.read().splitlines()
 
     logger.info("Loading model.")
-    qa = pipeline("question-answering", model=model_name)
+
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForQuestionAnswering.from_pretrained(model_name).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    qa = pipeline("question-answering", model=model, device=device, tokenizer=tokenizer)
 
     logger.info("Model loaded. Formatting inputs.")
     inputs = [
@@ -39,8 +44,8 @@ def question_answering(
 
     logger.info("Writing results to file.")
     with open(output_file, "w") as f_out:
-        for result, context, sent_offsets in zip(
-                results, contexts, context_offsets):
+        for result, context, sent_offsets, ques in zip(
+                results, contexts, context_offsets, questions):
             answer_start = result["start"]
             answer_end = result["end"]
             start_sentence_id = 0
@@ -55,8 +60,10 @@ def question_answering(
             in_sent_answer_start = answer_start - start_sentence_start
             in_sent_answer_end = answer_end - end_sentence_start
 
+            print(ques)
             print(context[start_sentence_start:end_sentence_end])
             print(context[answer_start:answer_end])
+            print()
             assert context[answer_start:answer_end] in context[start_sentence_start:end_sentence_end]
             print(f"{start_sentence_id}\t{in_sent_answer_start}\t{end_sentence_id + 1}\t{in_sent_answer_end}", file=f_out)
     logger.info("Done.")
