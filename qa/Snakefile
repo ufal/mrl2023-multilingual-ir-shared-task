@@ -16,11 +16,19 @@ NLLB_CODES = {
     'te': "tel_Telu",
 }
 
+localrules: data_for_qa_finetuning
 
 rule all:
     input:
-        expand("qa_experiments/baseline-deberta/{lang}/{split}.score",
-               lang=QA_LANGUAGES, split=["validation", "test"]),
+        #expand("qa_experiments/baseline/{lang}/{split}.score",
+        #       lang=QA_LANGUAGES, split=["validation", "test"]),
+        #expand("qa_data/{lang}/train.{type}.eng",
+        #       lang=QA_LANGUAGES, type=["question", "context"]),
+        #"qa_experiments/baseline/en/tiny.answers",
+        #expand("qa_data/{lang}/{split}.answers.eng",
+        #       lang=QA_LANGUAGES, split=["train", "validation", "test"])
+        #"qa_experiments/en/finetuning/success"
+        "qa_experiments/finetune/en/test.answers"
 
 
 rule download_xtreme_up:
@@ -45,18 +53,18 @@ rule format_xtreme_up_qa:
         anwser="qa_data/{lang}/{split}.answers",
     run:
         import json
-        with open(input[0]) as f:
+        with open(input[0], encoding="utf-8") as f:
             data = [json.loads(line) for line in f]
-        with open(output.question, "w") as f_question, \
-             open(output.context, "w") as f_context, \
-             open(output.anwser, "w") as f_answer:
+        with open(output.question, "w", encoding="utf-8") as f_question, \
+             open(output.context, "w", encoding="utf-8") as f_context, \
+             open(output.anwser, "w", encoding="utf-8") as f_answer:
             for item in data:
                 print(item['question'], file=f_question)
                 print(f"{item['title']}. {item['context']}", file=f_context)
                 print(item['target'], file=f_answer)
 
 
-rule sentence_split_context:
+rule split_contexts_to_sentences:
     input:
         "qa_data/{lang}/{split}.context.txt"
     output:
@@ -80,8 +88,8 @@ rule sentence_split_context:
             lang = "en"
 
         logger.info("Model loaded. Splitting sentences.")
-        with open(input[0]) as f_in, open(output.split, "w") as f_out, \
-                open(output.offsets, "w") as f_offsets:
+        with open(input[0], encoding="utf-8") as f_in, open(output.split, "w", encoding="utf-8") as f_out, \
+                open(output.offsets, "w", encoding="utf-8") as f_offsets:
             for line in f_in:
                 sentences = model.split(
                     line.strip(), lang_code=lang)
@@ -93,11 +101,11 @@ rule sentence_split_context:
         logger.info("Done.")
 
 
-rule translate_input_text:
+rule translate_questions:
     input:
-        src_text="{dataset}_data/{lang}/{split}.question.txt"
+        src_text="qa_data/{lang}/{split}.question.txt"
     output:
-        tgt_text="{dataset}_data/{lang}/{split}.question.eng"
+        tgt_text="qa_data/{lang}/{split}.question.eng"
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -114,7 +122,7 @@ rule translate_input_text:
         pipe = pipeline(
             "translation", model="facebook/nllb-200-3.3B", device=0)
         logger.info("Model loaded. Loading source text.")
-        with open(input.src_text) as f:
+        with open(input.src_text, encoding="utf-8") as f:
             src_text = f.readlines()
         logger.info("Source text loaded. Translating.")
         translation = pipe(
@@ -122,18 +130,18 @@ rule translate_input_text:
             src_lang=NLLB_CODES[wildcards.lang],
             tgt_lang="eng_Latn")
         logger.info("Translation done. Writing to file.")
-        with open(output.tgt_text, "w") as f:
+        with open(output.tgt_text, "w", encoding="utf-8") as f:
             for line in translation:
                 print(line['translation_text'], file=f)
         logger.info("Done.")
 
 
-rule translate_context_text:
+rule translate_contexts:
     input:
-        src_text="{dataset}_data/{lang}/{split}.context.split.txt"
+        src_text="qa_data/{lang}/{split}.context.split.txt"
     output:
-        tgt_text="{dataset}_data/{lang}/{split}.context.eng",
-        tgt_sentence_offsets="{dataset}_data/{lang}/{split}.context.eng-offsets"
+        tgt_text="qa_data/{lang}/{split}.context.eng",
+        tgt_sentence_offsets="qa_data/{lang}/{split}.context.eng-offsets"
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -153,7 +161,7 @@ rule translate_context_text:
 
         context_offsets = [0]
         src_text = []
-        with open(input.src_text) as f:
+        with open(input.src_text, encoding="utf-8") as f:
             for context_line in f:
                 context_sentences = context_line.strip().split("\t")
                 src_text.extend(context_sentences)
@@ -167,8 +175,8 @@ rule translate_context_text:
         logger.info("Translation done.")
 
         logger.info("Reorganize back to context and write to file.")
-        with open(output.tgt_text, "w") as f_tgt, \
-                open(output.tgt_sentence_offsets, "w") as f_offsets:
+        with open(output.tgt_text, "w", encoding="utf-8") as f_tgt, \
+                open(output.tgt_sentence_offsets, "w", encoding="utf-8") as f_offsets:
             for i in range(len(context_offsets) - 1):
                 tgt_context_sentences = [
                     line['translation_text'] for line in
@@ -181,13 +189,22 @@ rule translate_context_text:
         logger.info("Done.")
 
 
-rule baseline_qa:
+def qa_model_dir(wildcards):
+    if wildcards.method in ["baseline", "baseline-deberta"]:
+        return []
+    elif wildcards.method == "finetune":
+        return "qa_experiments/finetune/{lang}/model/checkpoints/checkpoint-500"
+    else:
+        raise ValueError("Unknown method: {}".format(wildcards.method))
+
+rule qa_inference:
     input:
-        question="{dataset}_data/{lang}/{split}.question.eng",
-        context="{dataset}_data/{lang}/{split}.context.eng",
-        context_offsets="{dataset}_data/{lang}/{split}.context.eng-offsets"
+        question="qa_data/{lang}/{split}.question.eng",
+        context="qa_data/{lang}/{split}.context.eng",
+        context_offsets="qa_data/{lang}/{split}.context.eng-offsets",
+        model=qa_model_dir
     output:
-        "{dataset}_experiments/baseline/{lang}/{split}.eng-annotated",
+        "qa_experiments/{method}/{lang}/{split}.eng-annotated",
     resources:
         mem="10G",
         cpus_per_task=2,
@@ -196,39 +213,109 @@ rule baseline_qa:
     run:
         from question_answering import question_answering
 
+        if wildcards.method == "baseline":
+            model = "deepset/roberta-base-squad2"
+        elif wildcards.method == "baseline-deberta":
+            model = "deepset/deberta-v3-large-squad2"
+        elif wildcards.method == "finetune":
+            model = input.model
+        else:
+            raise ValueError("Unknown method: {}".format(wildcards.method))
+
         question_answering(
             input.question, input.context, input.context_offsets,
-            output[0], "deepset/roberta-large-squad2")
+            output[0], model)
 
 
-rule baseline_deberta:
+rule project_answer_to_eng:
     input:
-        question="{dataset}_data/{lang}/{split}.question.eng",
-        context="{dataset}_data/{lang}/{split}.context.eng",
-        context_offsets="{dataset}_data/{lang}/{split}.context.eng-offsets"
+        orig_context_text="qa_data/{lang}/{split}.context.split.txt",
+        orig_answer_offsets="qa_data/{lang}/{split}.ref-offsets",
+        eng_context_text="qa_data/{lang}/{split}.context.eng",
+        eng_context_offsets="qa_data/{lang}/{split}.context.eng-offsets"
     output:
-        "{dataset}_experiments/baseline-deberta/{lang}/{split}.eng-annotated",
+        "qa_data/{lang}/{split}.answers.eng"
     resources:
-        mem="10G",
-        cpus_per_task=2,
+        mem="40G",
+        cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1"
+        flags="--gres=gpu:1 --constraint='gpuram48G'"
     run:
-        from question_answering import question_answering
 
-        question_answering(
-            input.question, input.context, input.context_offsets,
-            output[0], "deepset/deberta-v3-large-squad2")
+        # This rule takes the original contexts and answer spans, and projects
+        # the spans to the English translation of the context.
 
+        # The original context is sentence-split, with tabs as sentence
+        # separators. The span are 4 numbers, with start/end sentence/character
+        # offsets marking the answer in the context.
+
+        # The main function used here is `project_markup`
+        from constrained_translate_with_tags import project_markup
+
+        eng_sentences = []
+        orig_sentences = []
+        orig_spans = []
+        lines = []
+
+        f_orig = open(input.orig_context_text, encoding="utf-8")
+        f_eng = open(input.eng_context_text, encoding="utf-8")
+        f_offsets = open(input.eng_context_offsets, encoding="utf-8")
+        f_answers = open(input.orig_answer_offsets, encoding="utf-8")
+
+        for orig, eng, offsets, answer in zip(f_orig, f_eng, f_offsets, f_answers):
+            orig_spl = orig.strip().split("\t")
+            offsets_spl = list(map(int, offsets.strip().split(" ")))
+            eng_spl = [eng.strip()[start:end] for start, end in zip(offsets_spl[:-1], offsets_spl[1:])]
+
+            sent_beg, ans_beg, sent_end, ans_end = map(int, answer.strip().split("\t"))
+            if sent_beg == 0 and sent_end == 0:
+                lines.append(False)
+                continue
+
+            # from the original context, select just the sentences that contain the answer,
+            # keep the answer span
+            relevant_sentences = orig_spl[sent_beg:sent_end]
+            ans_end_mult = sum(len(sent) for sent in relevant_sentences[:-1]) + ans_end
+
+            orig_sentences.append("".join(relevant_sentences))
+            orig_spans.append([("ANSWER", ans_beg, ans_end_mult)])
+            eng_sentences.append("".join(eng_spl[sent_beg:sent_end]))
+            lines.append(True);
+
+        f_orig.close()
+        f_eng.close()
+        f_offsets.close()
+        f_answers.close()
+
+        projected_spans = project_markup(
+            orig_sentences, orig_spans, eng_sentences,
+            src_lang=NLLB_CODES[wildcards.lang],
+            tgt_lang="eng_Latn",
+            model="ychenNLP/nllb-200-3.3B-easyproject",
+            batch_size=8,
+            max_span_len=100,
+            is_token_based=False)
+
+        with open(output[0], "w", encoding="utf-8") as f_out:
+            pointer = 0
+            for has_answer in lines:
+                if has_answer:
+                    print(projected_spans[pointer])
+                    _, answer_start, answer_end = projected_spans[pointer][0]
+                    sent = eng_sentences[pointer]
+                    print(sent[answer_start:answer_end], file=f_out)
+                    pointer += 1
+                else:
+                    print("No Answer", file=f_out)
 
 rule project_answer_from_eng:
     input:
-        orig_context_text="{dataset}_data/{lang}/{split}.context.split.txt",
-        eng_context_text="{dataset}_data/{lang}/{split}.context.eng",
-        eng_context_offsets="{dataset}_data/{lang}/{split}.context.eng-offsets",
-        eng_answers="{dataset}_experiments/{method}/{lang}/{split}.eng-annotated"
+        orig_context_text="qa_data/{lang}/{split}.context.split.txt",
+        eng_context_text="qa_data/{lang}/{split}.context.eng",
+        eng_context_offsets="qa_data/{lang}/{split}.context.eng-offsets",
+        eng_answers="qa_experiments/{method}/{lang}/{split}.eng-annotated"
     output:
-        "{dataset}_experiments/{method}/{lang}/{split}.answers"
+        "qa_experiments/{method}/{lang}/{split}.answers"
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -237,11 +324,11 @@ rule project_answer_from_eng:
     run:
         from constrained_translate_with_tags import project_markup
 
-        with open(input.orig_context_text) as f_orig:
+        with open(input.orig_context_text, encoding="utf-8") as f_orig:
             orig_context_text = [
                 line.strip().split("\t") for line in f_orig.readlines()]
-        with open(input.eng_context_text) as f_eng, \
-                 open(input.eng_context_offsets) as f_offsets:
+        with open(input.eng_context_text, encoding="utf-8") as f_eng, \
+                 open(input.eng_context_offsets, encoding="utf-8") as f_offsets:
             eng_context_text = []
             for text_line, offsets_line in zip(f_eng, f_offsets):
                 offsets = list(map(int, offsets_line.strip().split(" ")))
@@ -252,7 +339,7 @@ rule project_answer_from_eng:
         eng_sentences = []
         tgt_sentences = []
         eng_spans = []
-        with open(input.eng_answers) as f_answers:
+        with open(input.eng_answers, encoding="utf-8") as f_answers:
             for line, orig_context, eng_context in zip(f_answers, orig_context_text, eng_context_text):
                 start_sentence_id, answer_start_in_sent, end_sentence_id, answer_end_in_sent = \
                     map(int, line.strip().split("\t"))
@@ -274,7 +361,7 @@ rule project_answer_from_eng:
             max_span_len=100,
             is_token_based=False)
 
-        with open(output[0], "w") as f_out:
+        with open(output[0], "w", encoding="utf-8") as f_out:
             for span, tgt_sent in zip(projected_spans, tgt_sentences):
                 _, answer_start, answer_end = span[0]
                 print(tgt_sent[answer_start:answer_end], file=f_out)
@@ -282,19 +369,19 @@ rule project_answer_from_eng:
 
 rule evaluate:
     input:
-        correct="{dataset}_data/{lang}/{split}.answers",
-        predicted="{dataset}_experiments/{method}/{lang}/{split}.answers"
+        correct="qa_data/{lang}/{split}.answers",
+        predicted="qa_experiments/{method}/{lang}/{split}.answers"
     output:
-        "{dataset}_experiments/{method}/{lang}/{split}.score"
+        "qa_experiments/{method}/{lang}/{split}.score"
     run:
         import evaluate
 
         cer_metric = evaluate.load("cer")
         chrf_metric = evaluate.load("chrf")
 
-        with open(input.correct) as f_correct:
+        with open(input.correct, encoding="utf-8") as f_correct:
             correct = f_correct.read().splitlines()
-        with open(input.predicted) as f_predicted:
+        with open(input.predicted, encoding="utf-8") as f_predicted:
             predicted = f_predicted.read().splitlines()
 
         cer_value = cer_metric.compute(predictions=predicted, references=correct)
@@ -302,22 +389,60 @@ rule evaluate:
             predictions=predicted,
             references=[[x] for x in correct])
 
-        with open(output[0], "w") as f_out:
+        with open(output[0], "w", encoding="utf-8") as f_out:
             print(f"{cer_value},{chrf_value['score']}", file=f_out)
+
+
+rule data_for_qa_finetuning:
+    input:
+        answers="qa_data/{lang}/{split}.answers.eng",
+        questions="qa_data/{lang}/{split}.question.eng",
+        contexts="qa_data/{lang}/{split}.context.eng",
+    output:
+        "qa_data/{lang}/{split}.qa_eng_finetune.tsv"
+    shell:
+        "./prepare_qa_datasets.sh {input.questions} {input.contexts} {input.answers} {output}"
+
+rule qa_finetuning:
+    input:
+        train="qa_data/{lang}/train.qa_eng_finetune.tsv",
+        valid="qa_data/{lang}/validation.qa_eng_finetune.tsv"
+    output:
+        directory("qa_experiments/{lang}/finetuning/checkpoints"),
+        touch("qa_experiments/{lang}/finetuning/success")
+    params:
+        batch_size=16,
+        max_epochs=10,
+        learning_rate=2e-5,
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1 --constraint='gpuram24G|gpuram40G|gpuram48G'"
+    run:
+        from finetune_qa import finetune_qa
+        finetune_qa(input.train,
+                    input.valid,
+                    output[0],
+                    model_type="deepset/roberta-large-squad2",
+                    batch_size=params.batch_size,
+                    epochs=params.max_epochs,
+                    learning_rate=params.learning_rate)
+
 
 
 rule reference_answer_offsets:
     input:
-        orig_context_text="{dataset}_data/{lang}/{split}.context.split.txt",
-        orig_answers="{dataset}_data/{lang}/{split}.answers"
+        orig_context_text="qa_data/{lang}/{split}.context.split.txt",
+        orig_answers="qa_data/{lang}/{split}.answers"
     output:
-        "{dataset}_data/{lang}/{split}.ref-offsets"
+        "qa_data/{lang}/{split}.ref-offsets"
     run:
         from get_answer_offsets import get_answer_offsets
 
-        with open(input.orig_context_text) as f_orig, \
-                open(input.orig_answers) as f_answers, \
-                open(output[0], "w") as f_out:
+        with open(input.orig_context_text, encoding="utf-8") as f_orig, \
+                open(input.orig_answers, encoding="utf-8") as f_answers, \
+                open(output[0], "w", encoding="utf-8") as f_out:
             for orig_context, orig_answers in zip(f_orig, f_answers):
                 offsets = get_answer_offsets(orig_context.strip(), orig_answers.strip())
                 print("\t".join(map(str, offsets)), file=f_out)
@@ -325,16 +450,16 @@ rule reference_answer_offsets:
 
 rule reconstruct_answer_from_offsets:
     input:
-        orig_context_text="{dataset}_data/{lang}/{split}.context.split.txt",
-        ref_offsets="{dataset}_data/{lang}/{split}.ref-offsets"
+        orig_context_text="qa_data/{lang}/{split}.context.split.txt",
+        ref_offsets="qa_data/{lang}/{split}.ref-offsets"
     output:
-        "{dataset}_data/{lang}/{split}.reconstructed"
+        "qa_data/{lang}/{split}.reconstructed"
     run:
         from get_answer_offsets import reconstruct_answer
 
-        with open(input.orig_context_text) as f_orig, \
-                open(input.ref_offsets) as f_offsets, \
-                open(output[0], "w") as f_out:
+        with open(input.orig_context_text, encoding="utf-8") as f_orig, \
+                open(input.ref_offsets, encoding="utf-8") as f_offsets, \
+                open(output[0], "w", encoding="utf-8") as f_out:
             for orig_context, offsets in zip(f_orig, f_offsets):
                 offsets = list(map(int, offsets.strip().split("\t")))
                 print(reconstruct_answer(orig_context.strip(), offsets), file=f_out)

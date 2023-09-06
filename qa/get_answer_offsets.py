@@ -12,7 +12,6 @@ def get_answer_offsets(context: str, answer: str):
     if answer == NOANSWER:
         return offsets
 
-
     # remove tabs, do not replace with spaces
     context_notabs = context.replace("\t", "")
 
@@ -30,7 +29,6 @@ def get_answer_offsets(context: str, answer: str):
     current_sentence = 0
     current_offset = 0
     global_offset = 0
-
 
     for char in context:
         if char == "\t":
