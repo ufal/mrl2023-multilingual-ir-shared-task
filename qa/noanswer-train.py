@@ -51,10 +51,10 @@ def train_noanswer_classification(
         per_device_eval_batch_size=batch_size,
         num_train_epochs=epochs,
         weight_decay=0.01,
-        evaluation_strategy="epoch",
-        save_strategy="no",
-        #save_strategy="epoch",
-        save_total_limit=2,
+        evaluation_strategy="steps",
+        eval_steps=5000,
+        save_strategy="steps",
+        save_steps=5000,
         load_best_model_at_end=True)
 
     trainer = Trainer(
@@ -67,6 +67,8 @@ def train_noanswer_classification(
         compute_metrics=compute_metrics)
 
     trainer.train()
+
+    # TODO here we need to get a link to the best checkpoint.
 
 
 if __name__ == "__main__":

@@ -463,3 +463,41 @@ rule reconstruct_answer_from_offsets:
             for orig_context, offsets in zip(f_orig, f_offsets):
                 offsets = list(map(int, offsets.strip().split("\t")))
                 print(reconstruct_answer(orig_context.strip(), offsets), file=f_out)
+
+rule prepare_data_noanswer_classifier:
+    input:
+        contexts=expand("qa_data/{lang}/{{split}}.context.eng", lang=QA_LANGUAGES),
+        questions=expand("qa_data/{lang}/{{split}}.question.eng", lang=QA_LANGUAGES),
+        answers=expand("qa_data/{lang}/{{split}}.answers", lang=QA_LANGUAGES)
+    output:
+        "qa_data/{split}-all.eng.tsv"
+    shell:
+        """
+        echo -e "text\tlabel" > {output}
+
+        paste <(paste -d" " <(cat {input.questions}) <(cat {input.contexts}))
+              <(cat {input.answers} | \
+                awk '{if ($0 == "No Answer") {print "0"} else {print "1"}}') \
+              >> {output}
+        """
+
+rule train_noanswer_classifier:
+    input:
+        train="qa_data/train-all.eng.tsv",
+        valid="qa_data/validation-all.eng.tsv"
+    output:
+        "qa_experiments/noanswer-model"
+    params:
+        model="deepset/roberta-large-squad2"
+        batch_size=8,
+        epochs=3,
+        learning_rate=2e-5
+    run:
+        from noanswer_train import train_noanswer_classification
+        train_noanswer_classification(train_tsv=input.train,
+                                      valid_tsv=input.valid,
+                                      output_dir=output,
+                                      model_type=params.model,
+                                      epochs=params.epochs,
+                                      batch_size=params.batch_size,
+                                      learning_rate=params.learning_rate)
