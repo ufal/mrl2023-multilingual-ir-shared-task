@@ -214,7 +214,7 @@ rule qa_inference:
         from question_answering import question_answering
 
         if wildcards.method == "baseline":
-            model = "deepset/roberta-base-squad2"
+            model = "deepset/roberta-large-squad2"
         elif wildcards.method == "baseline-deberta":
             model = "deepset/deberta-v3-large-squad2"
         elif wildcards.method == "finetune":
