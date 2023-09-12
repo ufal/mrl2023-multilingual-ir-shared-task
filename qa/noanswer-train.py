@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, \
     DataCollatorWithPadding, TrainingArguments, Trainer
@@ -16,7 +17,6 @@ def train_noanswer_classification(
         valid_tsv,
         output_dir,
         model_type="deepset/roberta-large-squad2",
-        batch_size=8,
         epochs=3,
         learning_rate=2e-5):
 
@@ -47,8 +47,7 @@ def train_noanswer_classification(
     training_args = TrainingArguments(
         output_dir=output_dir,
         learning_rate=learning_rate,
-        per_device_train_batch_size=batch_size,
-        per_device_eval_batch_size=batch_size,
+        auto_find_batch_size=True,
         num_train_epochs=epochs,
         weight_decay=0.01,
         evaluation_strategy="steps",
@@ -68,7 +67,12 @@ def train_noanswer_classification(
 
     trainer.train()
 
-    # TODO here we need to get a link to the best checkpoint.
+    best_checkpoint = trainer.state.best_model_checkpoint
+    print("Best checkpoint: {}".format(best_checkpoint))
+
+    # make a link to the checkpoint dir:
+    # https://stackoverflow.com/questions/8299386/modifying-a-symlink-in-python
+    os.symlink(best_checkpoint, os.path.join(output_dir, "best_checkpoint"))
 
 
 if __name__ == "__main__":

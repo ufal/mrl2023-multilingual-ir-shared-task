@@ -4,7 +4,7 @@ and apply it on a dataset.
 """
 
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
 
 INPUT_FIELD = "text"
 
@@ -15,23 +15,35 @@ def noanswer_classify(
         output_path: str,
         batch_size: int = 32):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load model
-    model = AutoModelForSequenceClassification.from_pretrained(model_path)
-    model.to(device)
-
-    # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_path)
-
-    def tokenize(batch):
-        return tokenizer(batch[INPUT_FIELD], truncation=True)
-
-    # Load dataset from tsv
+    classifier = pipeline("text-classification", model=model_path,
+                          tokenizer=tokenizer, device=0, truncation=True)
 
 
+    questions_f = open(question_file, "r", encoding="utf-8")
+    contexts_f = open(context_file, "r", encoding="utf-8")
 
+    data = []
+    for question, context in zip(questions_f, contexts_f):
+        question = question.strip()
+        context = context.strip()
+
+        data.append(f"{question} {context}")
+
+    questions_f.close()
+    contexts_f.close()
+
+    results = classifier(data, batch_size=batch_size)
+
+    with open(output_path, "w") as f:
+        for result in results:
+            f.write(f"{result['label']}\n")
 
 
 if __name__ == "__main__":
-    noanswer_classify()
+    print("Debug mode")
+    noanswer_classify(model_path="all-translated/checkpoint-3795",
+                      question_file="test-all.question.eng",
+                      context_file="test-all.context.eng",
+                      output_path="debug-results.eng")
