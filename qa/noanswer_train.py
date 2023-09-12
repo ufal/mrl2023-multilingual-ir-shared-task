@@ -17,8 +17,8 @@ def train_noanswer_classification(
         valid_tsv,
         output_dir,
         model_type="deepset/roberta-large-squad2",
-        epochs=3,
-        learning_rate=2e-5):
+        epochs=5,
+        learning_rate=1e-5):
 
     dataset = load_dataset(
         'csv',
@@ -51,10 +51,12 @@ def train_noanswer_classification(
         num_train_epochs=epochs,
         weight_decay=0.01,
         evaluation_strategy="steps",
-        eval_steps=5000,
+        eval_steps=500,
         save_strategy="steps",
-        save_steps=5000,
-        load_best_model_at_end=True)
+        save_steps=500,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_accuracy",
+        report_to="tensorboard")
 
     trainer = Trainer(
         model=model,

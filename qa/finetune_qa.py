@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import os
 import torch
 from transformers import AutoTokenizer, DefaultDataCollator, \
     AutoModelForQuestionAnswering, TrainingArguments, Trainer
@@ -11,9 +11,12 @@ def finetune_qa(
         valid_tsv,
         output_dir,
         model_type="deepset/roberta-large-squad2",
-        batch_size=16,
+        gradient_accumulation_steps=4,
         epochs=3,
-        learning_rate=2e-5):
+        learning_rate=2e-5,
+        weight_decay=0.01,
+        max_grad_norm=1.0,
+        warmup_ratio=0.0):
 
     dataset = load_dataset(
         "csv",
@@ -32,7 +35,6 @@ def finetune_qa(
         inputs = tokenizer(
             questions,
             contexts,
-            max_length=384,
             truncation="only_second",
             return_offsets_mapping=True,
             padding="max_length")
@@ -89,12 +91,20 @@ def finetune_qa(
 
     training_args = TrainingArguments(
         output_dir=output_dir,
-        evaluation_strategy="epoch",
+        evaluation_strategy="steps",
+        eval_steps=500,
+        save_strategy="steps",
+        save_steps=500,
         learning_rate=learning_rate,
-        per_device_train_batch_size=batch_size,
-        per_device_eval_batch_size=batch_size,
+        auto_find_batch_size=True,
         num_train_epochs=epochs,
-        weight_decay=0.01)
+        gradient_accumulation_steps=gradient_accumulation_steps,
+        weight_decay=weight_decay,
+        max_grad_norm=max_grad_norm,
+        warmup_ratio=warmup_ratio,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        report_to="tensorboard")
 
     trainer = Trainer(
         model=model,
@@ -105,6 +115,11 @@ def finetune_qa(
         data_collator=data_collator)
 
     trainer.train()
+
+    best_checkpoint = trainer.state.best_model_checkpoint
+    print("Best checkpoint: {}".format(best_checkpoint))
+
+    os.symlink(best_checkpoint, os.path.join(output_dir, "best_checkpoint"))
 
 
 if __name__ == "__main__":

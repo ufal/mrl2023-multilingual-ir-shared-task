@@ -4,6 +4,15 @@ QA_LANGUAGES = [
     "ar", "bn", "en", "fi", "id", 'ko', 'ru', 'sw', 'te'
 ]
 
+QA_VAL_LANGUAGES = {
+    "al": "ALS",
+    "az": "AZ",
+    "id": "ID",
+    "tr": "TR",
+    "uz": "UZ",
+    "yo": "YO"
+}
+
 NLLB_CODES = {
     "ar": "arb_Arab",
     "bn": "ben_Beng",
@@ -14,9 +23,41 @@ NLLB_CODES = {
     'ru': "rus_Cyrl",
     'sw': "swh_Latn",
     'te': "tel_Telu",
+
+    "al": "deu_Latn",
+    "az": "azj_Latn",
+    "bn": "ben_Beng",
+    "id": "ind_Latn",
+    "tr": "tur_Latn",
+    "uz": "uzn_Latn",
+    "yo": "yor_Latn"
 }
 
+
 localrules: data_for_qa_finetuning
+
+QA_TEMPLATE_GRID_SEARCH_NAME = (
+    "qa_experiments/finetune/exp"
+    "-gradsteps{gradient_accumulation_steps}"
+    "-lr{learning_rate}"
+    "-wd{weight_decay}"
+    "-gradnorm{max_grad_norm}"
+    "-warmup{warmup_ratio}/checkpoints")
+
+def generate_configurations_for_grid_search():
+    for gradient_accumulation_steps in [1]:
+        for learning_rate in [5e-6, 1e-6, 1e-7]:
+            for weight_decay in [0.1]:
+                for max_grad_norm in [1]:
+                    for warmup_ratio in [0.0, 0.5]:
+                        yield dict(gradient_accumulation_steps=gradient_accumulation_steps,
+                                   learning_rate=learning_rate,
+                                   weight_decay=weight_decay,
+                                   max_grad_norm=max_grad_norm,
+                                   warmup_ratio=warmup_ratio)
+
+def grid_search(wildcards):
+    return [QA_TEMPLATE_GRID_SEARCH_NAME.format(**cfg) for cfg in generate_configurations_for_grid_search()]
 
 rule all:
     input:
@@ -27,8 +68,10 @@ rule all:
         #"qa_experiments/baseline/en/tiny.answers",
         #expand("qa_data/{lang}/{split}.answers.eng",
         #       lang=QA_LANGUAGES, split=["train", "validation", "test"])
-        #"qa_experiments/en/finetuning/success"
-        "qa_experiments/finetune/en/test.answers"
+        #"qa_experiments/en/finetune/success"
+        expand("qa_experiments/finetune/{lang}/{split}.answer-candidates", lang=QA_LANGUAGES, split=["validation", "test"])
+        #grid_search
+
 
 
 rule download_xtreme_up:
@@ -42,7 +85,6 @@ rule download_xtreme_up:
         tar -xzf xtreme-up-v1.1.jsonl.tgz
         rm xtreme-up-v1.1.jsonl.tgz
         """
-
 
 rule format_xtreme_up_qa:
     input:
@@ -62,6 +104,41 @@ rule format_xtreme_up_qa:
                 print(item['question'], file=f_question)
                 print(f"{item['title']}. {item['context']}", file=f_context)
                 print(item['target'], file=f_answer)
+
+rule download_validation:
+    output:
+        expand("task_data/MRL_ST_2023/Val/QA_{lang}_Val.csv", lang=QA_VAL_LANGUAGES.keys())
+    shell:
+        """
+        mkdir -p task_data/
+        cd task_data
+        gdown --folder https://drive.google.com/drive/folders/15exVuU06dfbUWQtvSkRpA4JG4sxzgVli?usp=share_link
+        """
+
+rule format_validation:
+    input:
+        lambda wildcards: "task_data/MRL_ST_2023/Val/QA_{}_Val.csv".format(QA_VAL_LANGUAGES[wildcards.lang])
+    output:
+        context="qa_data/{lang}/task_val.context.txt",
+        question="qa_data/{lang}/task_val.question.txt",
+        anwser="qa_data/{lang}/task_val.answers"
+    run:
+        import csv
+
+        f_input = open(input[0], encoding="utf-8", newline="")
+        f_context = open(output.context, "w", encoding="utf-8")
+        f_question = open(output.question, "w", encoding="utf-8")
+        f_answer = open(output.anwser, "w", encoding="utf-8")
+
+        for row in csv.reader(f_input):
+            print(row[1], file=f_context)
+            print(row[2], file=f_question)
+            print(row[3], file=f_answer)
+
+        f_input.close()
+        f_context.close()
+        f_question.close()
+        f_answer.close()
 
 
 rule split_contexts_to_sentences:
@@ -105,7 +182,7 @@ rule translate_questions:
     input:
         src_text="qa_data/{lang}/{split}.question.txt"
     output:
-        tgt_text="qa_data/{lang}/{split}.question.eng"
+        tgt_text=protected("qa_data/{lang}/{split}.question.eng")
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -140,13 +217,14 @@ rule translate_contexts:
     input:
         src_text="qa_data/{lang}/{split}.context.split.txt"
     output:
-        tgt_text="qa_data/{lang}/{split}.context.eng",
-        tgt_sentence_offsets="qa_data/{lang}/{split}.context.eng-offsets"
+        tgt_text=protected("qa_data/{lang}/{split}.context.eng"),
+        tgt_sentence_offsets=protected("qa_data/{lang}/{split}.context.eng-offsets")
     resources:
         mem="40G",
         cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1 --constraint='gpuram16G|gpuram24G|gpuram40G|gpuram48G'"
+        #flags="--gres=gpu:1 --constraint='gpuram16G|gpuram24G|gpuram40G|gpuram48G'"
+        flags="--gres=gpu:1 --constraint='gpuram24G|gpuram40G|gpuram48G'"
     run:
         from transformers import pipeline
         import torch
@@ -170,7 +248,7 @@ rule translate_contexts:
         logger.info("Source context texts loaded. Translating.")
         translation = pipe(
             src_text,
-            src_lang=NLLB_CODES[wildcards.lang],
+            src_lang=NLLB_CODES[wildcards.lang[:2]],
             tgt_lang="eng_Latn")
         logger.info("Translation done.")
 
@@ -193,7 +271,7 @@ def qa_model_dir(wildcards):
     if wildcards.method in ["baseline", "baseline-deberta"]:
         return []
     elif wildcards.method == "finetune":
-        return "qa_experiments/finetune/{lang}/model/checkpoints/checkpoint-500"
+        return "qa_experiments/finetune/best"
     else:
         raise ValueError("Unknown method: {}".format(wildcards.method))
 
@@ -234,7 +312,7 @@ rule project_answer_to_eng:
         eng_context_text="qa_data/{lang}/{split}.context.eng",
         eng_context_offsets="qa_data/{lang}/{split}.context.eng-offsets"
     output:
-        "qa_data/{lang}/{split}.answers.eng"
+        protected("qa_data/{lang}/{split}.answers.eng")
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -289,7 +367,7 @@ rule project_answer_to_eng:
 
         projected_spans = project_markup(
             orig_sentences, orig_spans, eng_sentences,
-            src_lang=NLLB_CODES[wildcards.lang],
+            src_lang=NLLB_CODES[wildcards.lang[:2]],
             tgt_lang="eng_Latn",
             model="ychenNLP/nllb-200-3.3B-easyproject",
             batch_size=8,
@@ -315,12 +393,12 @@ rule project_answer_from_eng:
         eng_context_offsets="qa_data/{lang}/{split}.context.eng-offsets",
         eng_answers="qa_experiments/{method}/{lang}/{split}.eng-annotated"
     output:
-        "qa_experiments/{method}/{lang}/{split}.answers"
+        protected("qa_experiments/{method}/{lang}/{split}.answer-candidates")
     resources:
         mem="40G",
         cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1 --constraint='gpuram48G|gpuram40G|gpuram24G'"
+        flags="--gres=gpu:1 --constraint='gpuram48G'"
     run:
         from constrained_translate_with_tags import project_markup
 
@@ -395,40 +473,58 @@ rule evaluate:
 
 rule data_for_qa_finetuning:
     input:
-        answers="qa_data/{lang}/{split}.answers.eng",
-        questions="qa_data/{lang}/{split}.question.eng",
-        contexts="qa_data/{lang}/{split}.context.eng",
+        answers=expand("qa_data/{lang}/{{split}}.answers.eng", lang=QA_LANGUAGES),
+        questions=expand("qa_data/{lang}/{{split}}.question.eng", lang=QA_LANGUAGES),
+        contexts=expand("qa_data/{lang}/{{split}}.context.eng", lang=QA_LANGUAGES)
     output:
-        "qa_data/{lang}/{split}.qa_eng_finetune.tsv"
+        "qa_data/{split}.qa_eng_finetune.tsv"
     shell:
-        "./prepare_qa_datasets.sh {input.questions} {input.contexts} {input.answers} {output}"
+        """
+        echo -e "question\tcontext\tanswer" > {output}
+        paste <(cat {input.questions}) <(cat {input.contexts}) <(cat {input.answers}) \
+          | grep -v 'No Answer$' \
+          | grep -Pv '\t$' \
+          | grep -Pv '\t\t' \
+          | grep -Pv '^\t' \
+            >> {output}
+        """
 
 rule qa_finetuning:
     input:
-        train="qa_data/{lang}/train.qa_eng_finetune.tsv",
-        valid="qa_data/{lang}/validation.qa_eng_finetune.tsv"
+        train="qa_data/train.qa_eng_finetune.tsv",
+        valid="qa_data/validation.qa_eng_finetune.tsv"
     output:
-        directory("qa_experiments/{lang}/finetuning/checkpoints"),
-        touch("qa_experiments/{lang}/finetuning/success")
-    params:
-        batch_size=16,
-        max_epochs=10,
-        learning_rate=2e-5,
+        protected(directory(QA_TEMPLATE_GRID_SEARCH_NAME))
     resources:
         mem="40G",
         cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
         flags="--gres=gpu:1 --constraint='gpuram24G|gpuram40G|gpuram48G'"
+    params:
+        epochs=5
     run:
         from finetune_qa import finetune_qa
         finetune_qa(input.train,
                     input.valid,
                     output[0],
                     model_type="deepset/roberta-large-squad2",
-                    batch_size=params.batch_size,
-                    epochs=params.max_epochs,
-                    learning_rate=params.learning_rate)
+                    gradient_accumulation_steps=int(wildcards.gradient_accumulation_steps),
+                    epochs=params.epochs,
+                    learning_rate=float(wildcards.learning_rate),
+                    weight_decay=float(wildcards.weight_decay),
+                    max_grad_norm=float(wildcards.max_grad_norm),
+                    warmup_ratio=float(wildcards.warmup_ratio))
 
+
+# rule qa_best_model:
+#     input:
+#         grid_search
+#     output:
+#         "qa_experiments/finetune/best"
+#     shell:
+#         """
+#         echo "TODO: implement"
+#         """
 
 
 rule reference_answer_offsets:
@@ -475,29 +571,85 @@ rule prepare_data_noanswer_classifier:
         """
         echo -e "text\tlabel" > {output}
 
-        paste <(paste -d" " <(cat {input.questions}) <(cat {input.contexts}))
+        paste <(paste -d" " <(cat {input.questions}) <(cat {input.contexts})) \
               <(cat {input.answers} | \
-                awk '{if ($0 == "No Answer") {print "0"} else {print "1"}}') \
+                awk '{{if ($0 == "No Answer") {{print "0"}} else {{print "1"}} }}') \
               >> {output}
+        """
+
+rule sample_noanswer_validation:
+    input:
+        "qa_data/validation-all.eng.tsv"
+    output:
+        "qa_data/validation-sample.eng.tsv"
+    params:
+        size=1000
+    shell:
+        """
+        head -n1 {input} > {output}
+        tail -n+2 {input} | shuf -n {params.size} >> {output}
         """
 
 rule train_noanswer_classifier:
     input:
         train="qa_data/train-all.eng.tsv",
-        valid="qa_data/validation-all.eng.tsv"
+        valid="qa_data/validation-sample.eng.tsv"
     output:
-        "qa_experiments/noanswer-model"
+        directory("qa_experiments/noanswer_model"),
+        "qa_experiments/noanswer_model/best_checkpoint"
+    resources:
+        mem="10G",
+        cpus_per_task=2,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
     params:
-        model="deepset/roberta-large-squad2"
-        batch_size=8,
-        epochs=3,
-        learning_rate=2e-5
+        model="deepset/roberta-large-squad2",
+        epochs=5,
+        learning_rate=1e-5
     run:
         from noanswer_train import train_noanswer_classification
         train_noanswer_classification(train_tsv=input.train,
                                       valid_tsv=input.valid,
-                                      output_dir=output,
+                                      output_dir=output[0],
                                       model_type=params.model,
                                       epochs=params.epochs,
-                                      batch_size=params.batch_size,
                                       learning_rate=params.learning_rate)
+
+rule classify_noanswers:
+    input:
+        model="qa_experiments/noanswer_model",
+        contexts="qa_data/{lang}/{split}.context.eng",
+        questions="qa_data/{lang}/{split}.question.eng"
+    output:
+        "qa_experiments/noanswer_model/{lang}/{split}.noanswers"
+    params:
+        batch_size=16
+    resources:
+        mem="10G",
+        cpus_per_task=2,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    run:
+        from noanswer_classify import noanswer_classify
+        noanswer_classify(model_path=input.model,
+                          question_file=input.questions,
+                          context_file=input.contexts,
+                          output_path=output[0],
+                          batch_size=params.batch_size)
+
+rule merge_answers_and_noanswers:
+    input:
+        candidates="qa_experiments/{method}/{lang}/{split}.answer-candidates",
+        noanswers="qa_experiments/noanswer_model/{lang}/{split}.noanswers"
+    output:
+        "qa_experiments/{method}/{lang}/{split}.answers"
+    run:
+        cand_f = open(input.candidates, encoding="utf-8")
+        classes_f = open(input.noanswers, encoding="utf-8")
+        out_f = open(output[0], "w", encoding="utf-8")
+
+        for cand, cls in zip(cand_f, classes_f):
+            if cls.strip() == "LABEL_0":
+                print("No Answer", file=out_f)
+            else:
+                print(cand.strip(), file=out_f)
