@@ -1,4 +1,5 @@
 import logging
+import shutil
 
 MASAKHANER_LANGUAGES = [
     "amh", "hau", "ibo", "kin", "lug", "luo", "pcm", "swa", "wol", "yor"]
@@ -10,7 +11,10 @@ MASAKHANER2_LANGUAGES = [
 
 
 NLLB_CODES = {
+    "als": "deu_Latn", # MISSING
+    "als-regex": "deu_Latn", # MISSING
     "amh": "amh_Ethi",
+    "aze": "azj_Latn",
     "bam": "bam_Latn",
     "bbj": "fra_Latn", # MISSING
     "ewe": "ewe_Latn",
@@ -28,12 +32,21 @@ NLLB_CODES = {
     'swa': "swh_Latn",
     'tha': "tha_Thai",
     'tsn': "tsn_Latn",
+    "tur": "tur_Latn",
     'twi': "twi_Latn",
     'wol': "wol_Latn",
     'xho': "xho_Latn",
     'yor': "yor_Latn",
     'zho': "zho_Hans",
     'zul': "zul_Latn",
+}
+
+SHARED_TASK_VAL_LANGS = {
+    "als": "ALS", "aze": "AZ", "tur": "TR", "yor": "YO"
+}
+
+SHARED_TASK_TEST_LANGS = {
+    "als": "ALS", "aze": "AZ", "tur": "TR", "yor": "YO", "ibo": "IG"
 }
 
 
@@ -58,15 +71,29 @@ rule all:
         #       split=["validation", "test"]),
         #expand("masakhaner_data/{lng}/train.eng-tags", lng=MASAKHANER_LANGUAGES),
         #expand("masakhaner2_data/{lng}/train.eng-tags", lng=MASAKHANER2_LANGUAGES),
-        "finetune_tner/best_model",
-        expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
-               lang=MASAKHANER_LANGUAGES,
-               ner_method=["tner-finetuned"],
-               split=["validation", "test"]),
-        expand("masakhaner2_experiments/{ner_method}/{lang}/{split}.score",
-               lang=MASAKHANER2_LANGUAGES,
-               ner_method=["tner-finetuned"],
-               split=["validation", "test"]),
+        #"finetune_tner/best_model",
+        #expand("masakhaner_experiments/{ner_method}/{lang}/{split}.score",
+        #       lang=MASAKHANER_LANGUAGES,
+        #       ner_method=["tner-finetuned"],
+        #       split=["validation", "test"]),
+        #expand("masakhaner2_experiments/{ner_method}/{lang}/{split}.score",
+        #       lang=MASAKHANER2_LANGUAGES,
+        #       ner_method=["tner-finetuned"],
+        #       split=["validation", "test"]),
+        #expand("masakhaner2_data/{lng}/{split}.eng",
+        #       lng=MASAKHANER2_LANGUAGES, split=["validation", "test"]),
+        #expand("task_experiments/{ner_method}/{lang}/{split}.score",
+        #       lang=SHARED_TASK_VAL_LANGS.keys(),
+        #       ner_method=["tner-ontonotes5", "tner-conll2003"],
+        #       split=["validation"]),
+        #expand("task_experiments/{ner_method}/{lang}/{split}.score",
+        #       lang=["als-regex"],
+        #       ner_method=["tner-ontonotes5", "tner-conll2003", "tner-finetuned"],
+        #       split=["validation"]),
+         expand("task_experiments/{ner_method}/{lang}/test.conll",
+                lang=SHARED_TASK_TEST_LANGS.keys(),
+                ner_method=["tner-ontonotes5", "tner-conll2003", "tner-finetuned"]),
+
 
 
 rule download_masakhaner:
@@ -109,16 +136,152 @@ rule download_masakhaner2:
         f_tags.close()
 
 
+rule download_validation:
+    output:
+        directory("task_data/MRL_ST_2023_Val")
+    shell:
+        """
+        mkdir -p task_data/
+        cd task_data
+        gdown --folder https://drive.google.com/drive/folders/15exVuU06dfbUWQtvSkRpA4JG4sxzgVli?usp=share_link
+        """
+
+
+rule download_test:
+    output:
+        directory("task_data/MRL_ST_2023_Test")
+    shell:
+        """
+        mkdir -p task_data/
+        cd task_data
+        gdown --folder https://drive.google.com/drive/folders/1nkvzy7BLyFueANniAT9M5o0_-EnMy0Gc?usp=share_link -O MRL_ST_2023_Test
+        """
+
+
+rule format_shared_task_conll:
+    input:
+        raw_val_data_dir="task_data/MRL_ST_2023_Val",
+        raw_test_data_dir="task_data/MRL_ST_2023_Test",
+    output:
+        text_file="task_data/{lang}/{split}.txt",
+        tags_file="task_data/{lang}/{split}.tags",
+        conll_file="task_data/{lang}/{split}.conll"
+    wildcard_constraints:
+        lang="|".join(list(SHARED_TASK_VAL_LANGS.keys()) +
+                      list(SHARED_TASK_TEST_LANGS.keys())),
+    run:
+        logger = logging.getLogger("format_shared_task_conll")
+        logger.setLevel(logging.INFO)
+
+        if wildcards.split == "validation":
+            raw_split = "Val"
+            data_dir  = input.raw_val_data_dir
+        elif wildcards.split == "test":
+            raw_split = "Test"
+            data_dir  = input.raw_test_data_dir
+        else:
+            raise ValueError("Unknown split: {}".format(split))
+
+        raw_file = os.path.join(
+            data_dir,
+            f"NER_{SHARED_TASK_TEST_LANGS[wildcards.lang]}_{raw_split}.conll")
+
+        logger.info("Copying CoNLL file: %s", raw_file)
+        shutil.copy(raw_file, output.conll_file)
+
+        logger.info("Reading CoNLL file: %s", raw_file)
+
+        f_conll = open(raw_file, encoding="utf-8")
+        f_text = open(output.text_file, "w")
+        f_tags = open(output.tags_file, "w")
+
+        sentence = []
+        tags = []
+
+        def print_sentence():
+            print(" ".join(sentence), file=f_text)
+            if wildcards.split == "validation":
+                print(" ".join(tags), file=f_tags)
+
+        f_conll.readline()
+        for line in f_conll:
+            line = line.strip()
+            if not line:
+                print_sentence()
+                sentence = []
+                tags = []
+                continue
+            fields = line.split(" ")
+            sentence.append(fields[0])
+            if wildcards.split == "validation":
+                tags.append(fields[-1])
+        if sentence:
+            print_sentence()
+        logger.info("Done.")
+
+
+REPLACE_ALS = {
+    "Dr": "Der", "dr": "der", "isch": "ist", "het": "hat", "hett": "hatte",
+    "Septämber": "September", "Novämber": "November", "Dezämber": "Dezember",
+    "vu": "von", "Vu": "Von", "Vum": "Vom", "vum": "vom", "gsii": "gewesen",
+    "gsi": "gewesen", "syt": "seit", "wun": "wenn", "em": "im", "z": "zu",
+    "bi": "bei", "gsee": "gesehen", "e": "ein", "as": "als", "äine": "eine",
+    "äin": "ein", "uf": "auf", "s": "das", "fir": "für", "sini": "seine",
+    "sine": "seine",
+}
+
+rule preprocess_als:
+    input:
+        txt_file="task_data/als/{split}.txt",
+        tags_file="task_data/als/{split}.tags"
+    output:
+        txt_file="task_data/als-regex/{split}.txt",
+        tags_file="task_data/als-regex/{split}.tags"
+    run:
+        import os
+        import shutil
+
+        logger = logging.getLogger("preprocess_als")
+
+        os.makedirs("task_data/als-regex", exist_ok=True)
+        logger.info("Copy tags file.")
+        shutil.copy(input.tags_file, output.tags_file)
+
+        f_in = open(input.txt_file, encoding="utf-8")
+        f_out = open(output.txt_file, "w", encoding="utf-8")
+
+        logger.info("Preprocess text file.")
+        for line in f_in:
+            out_words = []
+            for word in line.split():
+                if word in REPLACE_ALS:
+                    out_words.append(REPLACE_ALS[word])
+                    continue
+                if word.startswith("g") and len(word) > 2 and word[1] not in "aeiouäöü":
+                    word = "ge" + word[2:]
+                if word.startswith("Joor") or word.startswith("Johr"):
+                    word = "Jahr" + word[4:]
+                if len(word) > 5 and word.endswith("e") and word[0].islower():
+                    word = word + "n"
+                out_words.append(word)
+            print(" ".join(out_words), file=f_out)
+
+        f_in.close()
+        f_out.close()
+        logger.info("Done.")
+
+
+
 rule translate_input_text:
     input:
         src_text="{dataset}_data/{lang}/{split}.txt"
     output:
-        tgt_text="{dataset}_data/{lang}/{split}.eng"
+        tgt_text=protected("{dataset}_data/{lang}/{split}.eng")
     resources:
         mem="40G",
         cpus_per_task=8,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1"
+        flags="--gres=gpu:1 --constraint='gpuram48G|gpuram40G|gpuram24G'"
     run:
         from transformers import pipeline
         import torch
@@ -128,7 +291,8 @@ rule translate_input_text:
 
         logger.info("Loading model.")
         pipe = pipeline(
-            "translation", model="facebook/nllb-200-3.3B", device=0)
+            "translation", model="facebook/nllb-200-3.3B", device=0,
+            max_length=512)
         logger.info("Model loaded. Loading source text.")
         with open(input.src_text) as f:
             src_text = f.readlines()
@@ -438,3 +602,32 @@ rule ner_with_tner_finetuned:
         source ../tner_env/bin/activate
         python3 apply_tner.py {input.model} {output.retokenized} > {output.tags}
         """
+
+
+rule output_as_conll:
+    input:
+        orig_conll="task_data/{lang}/{split}.conll",
+        tags="task_experiments/{method}/{lang}/{split}.orig-tags",
+    output:
+        "task_experiments/{method}/{lang}/{split}.conll"
+    run:
+        f_tags = open(input.tags, encoding="utf-8")
+        f_orig = open(input.orig_conll, encoding="utf-8")
+        f_out = open(output[0], "w", encoding="utf-8")
+
+        conll_line = None
+        for line in f_tags:
+            tags = line.strip().split()
+            conll_line = f_orig.readline().strip()
+            while not conll_line or conll_line.startswith("#") or "DOCSTART" in conll_line:
+                print(conll_line, file=f_out)
+                conll_line = f_orig.readline().strip()
+            for tag in tags:
+                fields = conll_line.split()[:3]
+                assert len(fields) == 3
+                print(" ".join(fields + [tag]), file=f_out)
+                conll_line = f_orig.readline().strip()
+
+        f_tags.close()
+        f_orig.close()
+        f_out.close()
