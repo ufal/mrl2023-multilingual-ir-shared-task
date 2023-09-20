@@ -142,6 +142,8 @@ def project_markup(
 
     all_projected_entities = []
     for eng_sent, entities, tgt_sent in zip(eng_sentences, all_entities, tgt_sentences):
+        eng_sent = eng_sent.strip().replace("[", "(").replace("]", ")")
+        tgt_sent = tgt_sent.strip().replace("[", "(").replace("]", ")")
 
         markup_positions, markup_sentences = inject_markup(
             tgt_sent, max_span_len, is_token_based)
@@ -178,7 +180,11 @@ def project_markup(
                     tokenized["labels"].view(-1)).view(bsz, seq_len)
                 scores.extend(loss_per_token.sum(dim=1).cpu().numpy().tolist())
 
-            _, (best_start, best_end) = min(zip(scores, markup_positions))
+            if not scores:
+                logging.warning("No scores for sentence: %s", src_sent)
+                best_start, best_end = 0, 1
+            else:
+                _, (best_start, best_end) = min(zip(scores, markup_positions))
             projected_entities.append((ent_type, best_start, best_end))
         all_projected_entities.append(projected_entities)
 
