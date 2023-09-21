@@ -1,3 +1,4 @@
+import sys
 import logging
 
 QA_LANGUAGES = [
@@ -8,6 +9,16 @@ QA_VAL_LANGUAGES = {
     "al": "ALS",
     "az": "AZ",
     "id": "ID",
+    "tr": "TR",
+    "uz": "UZ",
+    "yo": "YO"
+}
+
+QA_TEST_LANGUAGES = {
+    "al": "ALS",
+    "az": "AZ",
+    "id": "ID",
+    "ig": "IG",
     "tr": "TR",
     "uz": "UZ",
     "yo": "YO"
@@ -30,7 +41,9 @@ NLLB_CODES = {
     "id": "ind_Latn",
     "tr": "tur_Latn",
     "uz": "uzn_Latn",
-    "yo": "yor_Latn"
+    "yo": "yor_Latn",
+
+    "ig": "ibo_Latn"
 }
 
 
@@ -69,9 +82,12 @@ rule all:
         #expand("qa_data/{lang}/{split}.answers.eng",
         #       lang=QA_LANGUAGES, split=["train", "validation", "test"])
         #"qa_experiments/en/finetune/success"
-        expand("qa_experiments/finetune/{lang}/{split}.answer-candidates", lang=QA_LANGUAGES, split=["validation", "test"])
+        #expand("qa_experiments/finetune/{lang}/{split}.answer-candidates", lang=QA_LANGUAGES, split=["validation", "test"])
         #grid_search
-
+        #expand("qa_experiments/noanswer_model/{lang}/{split}.noanswers", lang=QA_LANGUAGES, split=["validation", "test"])
+        #expand("qa_experiments/{method}/{lang}/task_val.answers", lang=QA_VAL_LANGUAGES, method=["finetune", "baseline"]),
+        #expand("qa_experiments/{method}/{lang}/{split}.score", lang=QA_LANGUAGES, split=["validation", "test"], method=["finetune", "baseline"])
+        expand("qa_experiments/{method}/{lang}/task_test.answers", lang=QA_TEST_LANGUAGES, method=["finetune", "baseline"])
 
 
 rule download_xtreme_up:
@@ -93,6 +109,8 @@ rule format_xtreme_up_qa:
         question="qa_data/{lang}/{split}.question.txt",
         context="qa_data/{lang}/{split}.context.txt",
         anwser="qa_data/{lang}/{split}.answers",
+    wildcard_constraints:
+        split="train|validation|test"
     run:
         import json
         with open(input[0], encoding="utf-8") as f:
@@ -107,7 +125,7 @@ rule format_xtreme_up_qa:
 
 rule download_validation:
     output:
-        expand("task_data/MRL_ST_2023/Val/QA_{lang}_Val.csv", lang=QA_VAL_LANGUAGES.keys())
+        expand("task_data/MRL_ST_2023_Val/QA_{lang}_Val.csv", lang=QA_VAL_LANGUAGES.values())
     shell:
         """
         mkdir -p task_data/
@@ -115,9 +133,41 @@ rule download_validation:
         gdown --folder https://drive.google.com/drive/folders/15exVuU06dfbUWQtvSkRpA4JG4sxzgVli?usp=share_link
         """
 
+rule download_test:
+    output:
+        expand("task_data/MRL 2023 Test/QA_{lang}_Test.csv", lang=QA_TEST_LANGUAGES.values())
+    shell:
+        """
+        mkdir -p task_data/
+        cd task_data
+        gdown --folder https://drive.google.com/drive/folders/1nkvzy7BLyFueANniAT9M5o0_-EnMy0Gc?usp=share_link
+        """
+
+rule format_test:
+    input:
+        lambda wildcards: "task_data/MRL 2023 Test/QA_{}_Test.csv".format(QA_TEST_LANGUAGES[wildcards.lang])
+    output:
+        context="qa_data/{lang}/task_test.context.txt",
+        question="qa_data/{lang}/task_test.question.txt",
+    run:
+        import csv
+
+        f_input = open(input[0], encoding="utf-8", newline="")
+        f_context = open(output.context, "w", encoding="utf-8")
+        f_question = open(output.question, "w", encoding="utf-8")
+
+        for row_n, row in enumerate(csv.reader(f_input)):
+            print(row[1], file=f_context)
+            print(row[2], file=f_question)
+
+        f_input.close()
+        f_context.close()
+        f_question.close()
+
+
 rule format_validation:
     input:
-        lambda wildcards: "task_data/MRL_ST_2023/Val/QA_{}_Val.csv".format(QA_VAL_LANGUAGES[wildcards.lang])
+        lambda wildcards: "task_data/MRL_ST_2023_Val/QA_{}_Val.csv".format(QA_VAL_LANGUAGES[wildcards.lang])
     output:
         context="qa_data/{lang}/task_val.context.txt",
         question="qa_data/{lang}/task_val.question.txt",
@@ -130,10 +180,17 @@ rule format_validation:
         f_question = open(output.question, "w", encoding="utf-8")
         f_answer = open(output.anwser, "w", encoding="utf-8")
 
-        for row in csv.reader(f_input):
+        for row_n, row in enumerate(csv.reader(f_input)):
             print(row[1], file=f_context)
             print(row[2], file=f_question)
-            print(row[3], file=f_answer)
+
+            if not row[3]:
+                # This is a fix for Uzbek validation set which contains two
+                # empty answers
+                print(".", file=f_answer)
+                print("Encountered an empty answer in file {}, line {}".format(input[0], row_n), file=sys.stderr)
+            else:
+                print(row[3], file=f_answer)
 
         f_input.close()
         f_context.close()
@@ -161,13 +218,14 @@ rule split_contexts_to_sentences:
         model.half().to("cuda")
 
         lang = wildcards.lang
-        if lang == "sw":
+        if lang in ["al", "sw"]:
             lang = "en"
 
         logger.info("Model loaded. Splitting sentences.")
         with open(input[0], encoding="utf-8") as f_in, open(output.split, "w", encoding="utf-8") as f_out, \
                 open(output.offsets, "w", encoding="utf-8") as f_offsets:
             for line in f_in:
+
                 sentences = model.split(
                     line.strip(), lang_code=lang)
                 print("\t".join(sentences), file=f_out)
@@ -470,6 +528,31 @@ rule evaluate:
         with open(output[0], "w", encoding="utf-8") as f_out:
             print(f"{cer_value},{chrf_value['score']}", file=f_out)
 
+rule evaluate_candidates:
+    input:
+        correct="qa_data/{lang}/{split}.answers",
+        predicted="qa_experiments/{method}/{lang}/{split}.answer-candidates"
+    output:
+        "qa_experiments/{method}/{lang}/{split}.score-candidates"
+    run:
+        import evaluate
+
+        cer_metric = evaluate.load("cer")
+        chrf_metric = evaluate.load("chrf")
+
+        with open(input.correct, encoding="utf-8") as f_correct:
+            correct = f_correct.read().splitlines()
+        with open(input.predicted, encoding="utf-8") as f_predicted:
+            predicted = f_predicted.read().splitlines()
+
+        cer_value = cer_metric.compute(predictions=predicted, references=correct)
+        chrf_value = chrf_metric.compute(
+            predictions=predicted,
+            references=[[x] for x in correct])
+
+        with open(output[0], "w", encoding="utf-8") as f_out:
+            print(f"{cer_value},{chrf_value['score']}", file=f_out)
+
 
 rule data_for_qa_finetuning:
     input:
@@ -595,31 +678,32 @@ rule train_noanswer_classifier:
         train="qa_data/train-all.eng.tsv",
         valid="qa_data/validation-sample.eng.tsv"
     output:
-        directory("qa_experiments/noanswer_model"),
         "qa_experiments/noanswer_model/best_checkpoint"
+    params:
+        workdir="qa_experiments/noanswer_model"
     resources:
         mem="10G",
         cpus_per_task=2,
         partition="gpu-troja,gpu-ms",
-        flags="--gres=gpu:1"
+        flags="--gres=gpu:1 --constraint='gpuram40G|gpuram48G'"
     params:
         model="deepset/roberta-large-squad2",
-        epochs=5,
+        epochs=3,
         learning_rate=1e-5
     run:
         from noanswer_train import train_noanswer_classification
         train_noanswer_classification(train_tsv=input.train,
                                       valid_tsv=input.valid,
-                                      output_dir=output[0],
+                                      output_dir=params.workdir,
                                       model_type=params.model,
                                       epochs=params.epochs,
                                       learning_rate=params.learning_rate)
 
 rule classify_noanswers:
     input:
-        model="qa_experiments/noanswer_model",
+        model="qa_experiments/noanswer_model/best_checkpoint",
         contexts="qa_data/{lang}/{split}.context.eng",
-        questions="qa_data/{lang}/{split}.question.eng"
+        questions="qa_data/{lang}/{split}.question.eng",
     output:
         "qa_experiments/noanswer_model/{lang}/{split}.noanswers"
     params:

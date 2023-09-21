@@ -74,7 +74,7 @@ def train_noanswer_classification(
 
     # make a link to the checkpoint dir:
     # https://stackoverflow.com/questions/8299386/modifying-a-symlink-in-python
-    os.symlink(best_checkpoint, os.path.join(output_dir, "best_checkpoint"))
+    os.symlink(best_checkpoint, "best_checkpoint")
 
 
 if __name__ == "__main__":

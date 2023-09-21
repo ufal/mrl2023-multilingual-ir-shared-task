@@ -119,7 +119,7 @@ def finetune_qa(
     best_checkpoint = trainer.state.best_model_checkpoint
     print("Best checkpoint: {}".format(best_checkpoint))
 
-    os.symlink(best_checkpoint, os.path.join(output_dir, "best_checkpoint"))
+    os.symlink(best_checkpoint, "best_checkpoint")
 
 
 if __name__ == "__main__":
