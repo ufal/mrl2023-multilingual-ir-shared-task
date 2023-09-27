@@ -47,7 +47,7 @@ NLLB_CODES = {
 }
 
 
-localrules: data_for_qa_finetuning
+localrules: data_for_qa_finetuning, llama2_postprocess, prepare_submission_csv
 
 QA_TEMPLATE_GRID_SEARCH_NAME = (
     "qa_experiments/finetune/exp"
@@ -85,9 +85,14 @@ rule all:
         #expand("qa_experiments/finetune/{lang}/{split}.answer-candidates", lang=QA_LANGUAGES, split=["validation", "test"])
         #grid_search
         #expand("qa_experiments/noanswer_model/{lang}/{split}.noanswers", lang=QA_LANGUAGES, split=["validation", "test"])
-        #expand("qa_experiments/{method}/{lang}/task_val.answers", lang=QA_VAL_LANGUAGES, method=["finetune", "baseline"]),
-        #expand("qa_experiments/{method}/{lang}/{split}.score", lang=QA_LANGUAGES, split=["validation", "test"], method=["finetune", "baseline"])
-        expand("qa_experiments/{method}/{lang}/task_test.answers", lang=QA_TEST_LANGUAGES, method=["finetune", "baseline"])
+        #expand("qa_experiments/{method}/{lang}/{split}.score",
+        #       lang=QA_LANGUAGES, split=["validation", "test"], method=["pretrained-t5", "pretrained-llama2"]),
+        # expand("qa_experiments/{method}/{lang}/task_val.score",
+        #        lang=QA_VAL_LANGUAGES, method=["pretrained-t5", "pretrained-llama2"]),
+        #expand("qa_experiments/{method}/{lang}/task_test.answers",
+        #       lang=QA_TEST_LANGUAGES, method=["pretrained-t5", "pretrained-llama2"])
+        expand("submission/CUNI_QA_{lang}_Test.csv", lang=QA_TEST_LANGUAGES.values())
+
 
 
 rule download_xtreme_up:
@@ -325,6 +330,155 @@ rule translate_contexts:
         logger.info("Done.")
 
 
+LLAMA_PROMPT = "Short answer (one sentence, at most 5 words):"
+
+
+rule llama2_inference:
+    input:
+        question="qa_data/{lang}/{split}.question.eng",
+        context="qa_data/{lang}/{split}.context.eng"
+    output:
+        "qa_experiments/pretrained-llama2/{lang}/{split}.eng-generated-raw"
+    resources:
+        mem="10G",
+        cpus_per_task=2,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1 --constraint='gpuram48G'"
+    run:
+        from transformers import AutoTokenizer, pipeline
+        import torch
+
+        model = "meta-llama/Llama-2-13b-chat-hf"
+
+        tokenizer = AutoTokenizer.from_pretrained(model)
+        pipeline = pipeline(
+            "text-generation",
+            model=model,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            max_new_tokens=64)
+
+        f_question = open(input.question, "r", encoding="utf-8")
+        f_context = open(input.context, "r", encoding="utf-8")
+        f_output = open(output[0], "w", encoding="utf-8")
+
+        for question, context in zip(f_question, f_context):
+            question = question.strip()
+            context = context.strip()
+            input_text = f"Context: {context} Question: {question} {LLAMA_PROMPT}"
+            output_text = pipeline(input_text)[0]["generated_text"].replace("\n", " ")
+
+            print(output_text, file=f_output)
+
+        f_question.close()
+        f_context.close()
+        f_output.close()
+
+
+rule llama2_postprocess:
+    input:
+        "qa_experiments/pretrained-llama2/{lang}/{split}.eng-generated-raw"
+    output:
+        "qa_experiments/pretrained-llama2/{lang}/{split}.eng-generated"
+    run:
+        import spacy
+        import re
+
+        nlp = spacy.load("en_core_web_lg")
+        f_input = open(input[0], "r", encoding="utf-8")
+        f_output = open(output[0], "w", encoding="utf-8")
+
+        for line in f_input:
+            # replace multiple whitespace sequences with a single space using regex
+            output_text = re.sub(r"\s+", " ", line).strip()
+
+            # remove the prefix before the first occurrence of Short answer:
+            output_text = output_text[output_text.find(LLAMA_PROMPT) + len(LLAMA_PROMPT):].strip()
+
+            # remove whatever comes after "Long answer:", or "Explanation:"
+            output_text = output_text[:output_text.find("Long answer:")].strip()
+            output_text = output_text[:output_text.find("Explanation:")].strip()
+
+            # take the first sentence from the rest
+            sents = list(nlp(output_text).sents)
+            output_text = sents[0].text if sents else ""
+            print(output_text, file=f_output)
+
+        f_input.close()
+        f_output.close()
+
+rule qa_t5_inference:
+    input:
+        question="qa_data/{lang}/{split}.question.eng",
+        context="qa_data/{lang}/{split}.context.eng"
+    output:
+        "qa_experiments/pretrained-t5/{lang}/{split}.eng-generated"
+    resources:
+        mem="10G",
+        cpus_per_task=2,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1"
+    run:
+        from transformers import AutoTokenizer, AutoModelWithLMHead, pipeline
+
+        model_name = "MaRiOrOsSi/t5-base-finetuned-question-answering"
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelWithLMHead.from_pretrained(model_name)
+
+        f_question = open(input.question, "r", encoding="utf-8")
+        f_context = open(input.context, "r", encoding="utf-8")
+        f_answer = open(output[0], "w", encoding="utf-8")
+
+        for question, context in zip(f_question, f_context):
+
+            prompt = f"question: {question.strip()} context: {context.strip()}"
+            encoded_input = tokenizer([prompt],
+                                      return_tensors='pt',
+                                      max_length=512,
+                                      truncation=True)
+            output = model.generate(input_ids = encoded_input.input_ids,
+                                    attention_mask = encoded_input.attention_mask)
+            output = tokenizer.decode(output[0], skip_special_tokens=True)
+            print(output, file=f_answer)
+
+        f_question.close()
+        f_context.close()
+        f_answer.close()
+
+rule translate_generated_answers:
+    input:
+        src_text="qa_experiments/pretrained-{model}/{lang}/{split}.eng-generated"
+    output:
+        tgt_text=protected("qa_experiments/pretrained-{model}/{lang}/{split}.answers")
+    resources:
+        mem="40G",
+        cpus_per_task=8,
+        partition="gpu-troja,gpu-ms",
+        flags="--gres=gpu:1 --constraint='gpuram48G'"
+    run:
+        from transformers import pipeline
+        import torch
+
+        logger = logging.getLogger("translate")
+        logger.setLevel(logging.INFO)
+
+        logger.info("Loading model.")
+        pipe = pipeline(
+            "translation", model="facebook/nllb-200-3.3B", device=0)
+        logger.info("Model loaded. Loading source text.")
+        with open(input.src_text, encoding="utf-8") as f:
+            src_text = f.readlines()
+        logger.info("Source text loaded. Translating.")
+        translation = pipe(
+            src_text,
+            src_lang="eng_Latn",
+            tgt_lang=NLLB_CODES[wildcards.lang])
+        logger.info("Translation done. Writing to file.")
+        with open(output.tgt_text, "w", encoding="utf-8") as f:
+            for line in translation:
+                print(line['translation_text'], file=f)
+        logger.info("Done.")
+
 def qa_model_dir(wildcards):
     if wildcards.method in ["baseline", "baseline-deberta"]:
         return []
@@ -520,6 +674,11 @@ rule evaluate:
         with open(input.predicted, encoding="utf-8") as f_predicted:
             predicted = f_predicted.read().splitlines()
 
+        if wildcards.split in ["task_val", "task_test"]:
+            # due to a bug, the first line contains the CSV header
+            correct = correct[1:]
+            predicted = predicted[1:]
+
         cer_value = cer_metric.compute(predictions=predicted, references=correct)
         chrf_value = chrf_metric.compute(
             predictions=predicted,
@@ -544,6 +703,11 @@ rule evaluate_candidates:
             correct = f_correct.read().splitlines()
         with open(input.predicted, encoding="utf-8") as f_predicted:
             predicted = f_predicted.read().splitlines()
+
+        if wildcards.split in ["task_val", "task_test"]:
+            # due to a bug, the first line contains the CSV header
+            correct = correct[1:]
+            predicted = predicted[1:]
 
         cer_value = cer_metric.compute(predictions=predicted, references=correct)
         chrf_value = chrf_metric.compute(
@@ -597,17 +761,6 @@ rule qa_finetuning:
                     weight_decay=float(wildcards.weight_decay),
                     max_grad_norm=float(wildcards.max_grad_norm),
                     warmup_ratio=float(wildcards.warmup_ratio))
-
-
-# rule qa_best_model:
-#     input:
-#         grid_search
-#     output:
-#         "qa_experiments/finetune/best"
-#     shell:
-#         """
-#         echo "TODO: implement"
-#         """
 
 
 rule reference_answer_offsets:
@@ -737,3 +890,42 @@ rule merge_answers_and_noanswers:
                 print("No Answer", file=out_f)
             else:
                 print(cand.strip(), file=out_f)
+
+rule prepare_submission_csv:
+    input:
+        original="task_data/MRL 2023 Test/QA_{lang3}_Test.csv",
+        answers=lambda wildcards: "qa_experiments/baseline/{lang2}/task_test.answer-candidates".format(lang2=next(key for key, value in QA_TEST_LANGUAGES.items() if value == wildcards.lang3))
+    output:
+        "submission/CUNI_QA_{lang3}_Test.csv"
+    # shell:
+    #     """
+    #     mkdir -p submission
+    #     echo 'id,text,question,answer' >> {output}
+    #     paste -d',' <(tail -n+2 "{input.original}") <(tail -n+2 "{input.answers}") >> {output}
+    #     """
+    run:
+        import os
+        import csv
+
+        # make submission dir:
+        os.makedirs(os.path.dirname(output[0]), exist_ok=True)
+
+        f_orig = open(input.original, encoding="utf-8")
+        f_answers = open(input.answers, encoding="utf-8")
+        f_output = open(output[0], "w", encoding="utf-8")
+
+        orig_reader = csv.reader(f_orig)
+        writer = csv.writer(f_output)
+
+        # copy header from original csv and add the 'answer' column:
+        writer.writerow(next(orig_reader) + ["answer"])
+        next(f_answers)  # skip header
+
+        # read original csv:
+        for orig_row, answer in zip(orig_reader, f_answers):
+            # add answer to the row and write to output:
+            writer.writerow(orig_row + [answer.strip()])
+
+        f_orig.close()
+        f_answers.close()
+        f_output.close()
