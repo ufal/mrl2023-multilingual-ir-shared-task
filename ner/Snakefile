@@ -90,11 +90,12 @@ rule all:
         #       lang=["als-regex"],
         #       ner_method=["tner-ontonotes5", "tner-conll2003", "tner-finetuned"],
         #       split=["validation"]),
-         expand("task_experiments/{ner_method}/{lang}/test.conll",
-                lang=SHARED_TASK_TEST_LANGS.keys(),
-                ner_method=["tner-ontonotes5", "tner-conll2003", "tner-finetuned"]),
+        # expand("task_experiments/{ner_method}/{lang}/test.conll",
+        #        lang=SHARED_TASK_TEST_LANGS.keys(),
+        #        ner_method=["tner-ontonotes5", "tner-conll2003", "tner-finetuned"]),
+        expand("submission/CUNI_NER_{lang}_Test.conll", lang=SHARED_TASK_TEST_LANGS.values())
 
-
+localrules: prepare_submission_conll, output_as_conll
 
 rule download_masakhaner:
     output:
@@ -627,7 +628,21 @@ rule output_as_conll:
                 assert len(fields) == 3
                 print(" ".join(fields + [tag]), file=f_out)
                 conll_line = f_orig.readline().strip()
+            print(file=f_out)
 
         f_tags.close()
         f_orig.close()
         f_out.close()
+
+
+rule prepare_submission_conll:
+    input:
+        lambda wildcards: "task_experiments/tner-ontonotes5/{lang3}/test.conll".format(
+            lang3=next(key for key, value in SHARED_TASK_TEST_LANGS.items() if value == wildcards.tasklang))
+    output:
+        "submission/CUNI_NER_{tasklang}_Test.conll"
+    shell:
+        """
+        mkdir -p submission
+        cp "{input}" "{output}"
+        """

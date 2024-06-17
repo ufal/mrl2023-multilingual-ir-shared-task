@@ -87,11 +87,13 @@ rule all:
         #expand("qa_experiments/noanswer_model/{lang}/{split}.noanswers", lang=QA_LANGUAGES, split=["validation", "test"])
         #expand("qa_experiments/{method}/{lang}/{split}.score",
         #       lang=QA_LANGUAGES, split=["validation", "test"], method=["pretrained-t5", "pretrained-llama2"]),
-        # expand("qa_experiments/{method}/{lang}/task_val.score",
-        #        lang=QA_VAL_LANGUAGES, method=["pretrained-t5", "pretrained-llama2"]),
+        expand("qa_experiments/{method}/{lang}/task_val.score-candidates",
+               lang=QA_VAL_LANGUAGES, method=["pretrained-llama2"]),
         #expand("qa_experiments/{method}/{lang}/task_test.answers",
         #       lang=QA_TEST_LANGUAGES, method=["pretrained-t5", "pretrained-llama2"])
-        expand("submission/CUNI_QA_{lang}_Test.csv", lang=QA_TEST_LANGUAGES.values())
+        expand("submission/CUNI_QA_{lang}_Test.csv", lang=QA_TEST_LANGUAGES.values()),
+        expand("submission/CUNI_CONTRASTIVE_QA_{lang}_Test.csv", lang=QA_TEST_LANGUAGES.values())
+
 
 
 
@@ -330,8 +332,7 @@ rule translate_contexts:
         logger.info("Done.")
 
 
-LLAMA_PROMPT = "Short answer (one sentence, at most 5 words):"
-
+LLAMA_PROMPT = "Short answer:"
 
 rule llama2_inference:
     input:
@@ -449,7 +450,7 @@ rule translate_generated_answers:
     input:
         src_text="qa_experiments/pretrained-{model}/{lang}/{split}.eng-generated"
     output:
-        tgt_text=protected("qa_experiments/pretrained-{model}/{lang}/{split}.answers")
+        tgt_text=protected("qa_experiments/pretrained-{model}/{lang}/{split}.answer-candidates")
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -495,6 +496,8 @@ rule qa_inference:
         model=qa_model_dir
     output:
         "qa_experiments/{method}/{lang}/{split}.eng-annotated",
+    wildcard_constraints:
+        method="baseline|baseline-deberta|finetune"
     resources:
         mem="10G",
         cpus_per_task=2,
@@ -606,6 +609,8 @@ rule project_answer_from_eng:
         eng_answers="qa_experiments/{method}/{lang}/{split}.eng-annotated"
     output:
         protected("qa_experiments/{method}/{lang}/{split}.answer-candidates")
+    wildcard_constraints:
+        method="baseline|baseline-deberta|finetune"
     resources:
         mem="40G",
         cpus_per_task=8,
@@ -657,42 +662,20 @@ rule project_answer_from_eng:
                 print(tgt_sent[answer_start:answer_end], file=f_out)
 
 
+answer_wildcards = {
+    "score": "answers",
+    "score-candidates": "answer-candidates"}
+
+
 rule evaluate:
     input:
         correct="qa_data/{lang}/{split}.answers",
-        predicted="qa_experiments/{method}/{lang}/{split}.answers"
+        predicted=lambda wildcards: "qa_experiments/{{method}}/{{lang}}/{{split}}.{}".format(
+            answer_wildcards[wildcards.scorecandidates])
     output:
-        "qa_experiments/{method}/{lang}/{split}.score"
-    run:
-        import evaluate
-
-        cer_metric = evaluate.load("cer")
-        chrf_metric = evaluate.load("chrf")
-
-        with open(input.correct, encoding="utf-8") as f_correct:
-            correct = f_correct.read().splitlines()
-        with open(input.predicted, encoding="utf-8") as f_predicted:
-            predicted = f_predicted.read().splitlines()
-
-        if wildcards.split in ["task_val", "task_test"]:
-            # due to a bug, the first line contains the CSV header
-            correct = correct[1:]
-            predicted = predicted[1:]
-
-        cer_value = cer_metric.compute(predictions=predicted, references=correct)
-        chrf_value = chrf_metric.compute(
-            predictions=predicted,
-            references=[[x] for x in correct])
-
-        with open(output[0], "w", encoding="utf-8") as f_out:
-            print(f"{cer_value},{chrf_value['score']}", file=f_out)
-
-rule evaluate_candidates:
-    input:
-        correct="qa_data/{lang}/{split}.answers",
-        predicted="qa_experiments/{method}/{lang}/{split}.answer-candidates"
-    output:
-        "qa_experiments/{method}/{lang}/{split}.score-candidates"
+        "qa_experiments/{method}/{lang}/{split}.{scorecandidates}"
+    wildcard_constraints:
+        scorecandidates="score|score-candidates"
     run:
         import evaluate
 
@@ -894,15 +877,13 @@ rule merge_answers_and_noanswers:
 rule prepare_submission_csv:
     input:
         original="task_data/MRL 2023 Test/QA_{lang3}_Test.csv",
-        answers=lambda wildcards: "qa_experiments/baseline/{lang2}/task_test.answer-candidates".format(lang2=next(key for key, value in QA_TEST_LANGUAGES.items() if value == wildcards.lang3))
+        answers=lambda wildcards: "qa_experiments/{method}/{lang2}/task_test.answer-candidates".format(
+            lang2=next(key for key, value in QA_TEST_LANGUAGES.items() if value == wildcards.lang3),
+            method="baseline" if wildcards.what == "CUNI" else "pretrained-llama2")
     output:
-        "submission/CUNI_QA_{lang3}_Test.csv"
-    # shell:
-    #     """
-    #     mkdir -p submission
-    #     echo 'id,text,question,answer' >> {output}
-    #     paste -d',' <(tail -n+2 "{input.original}") <(tail -n+2 "{input.answers}") >> {output}
-    #     """
+        "submission/{what}_QA_{lang3}_Test.csv"
+    wildcard_constraints:
+        what="CUNI|CUNI_CONTRASTIVE"
     run:
         import os
         import csv
